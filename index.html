@@ -187,6 +187,13 @@ td.best{color:var(--good);font-weight:700}
 .progress{height:4px;background:var(--sunk);border-radius:2px;overflow:hidden;margin-top:8px}
 .progress i{display:block;height:100%;background:var(--accent);transition:width .3s}
 .mbar-top{display:none}
+.peer-t{table-layout:fixed;min-width:760px}
+.peer-t col.c0{width:20%} .peer-t col.cx{width:20%}
+.peer-t th.peer-h{text-align:right;vertical-align:bottom;padding:10px 12px;white-space:normal}
+.peer-t th.peer-h0{vertical-align:bottom}
+.peer-l{display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px}
+.peer-s{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;padding:6px 8px;font-size:13.5px;text-align:left}
+.peer-t td.peer-p{font-size:12px;color:var(--muted);white-space:normal}
 .bt-list{display:grid;gap:12px}
 .bt-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.4fr);gap:16px;margin-top:10px}
 .bt-rule{margin-bottom:8px}
@@ -724,15 +731,16 @@ function viewPeer(){
   if(!S.peer.length || S.peer[0]!==S.sel) S.peer=[S.sel,...pool.filter(i=>i!==S.sel)].slice(0,4);
   let h=topbar('Cross-sectional view','同業比較',`<button class="btn gold" data-act="addCo">＋ 自動加入公司</button>`);
   h+=`<div class="banner">系統依「財報健檢」目前的公司自動帶入所屬群組；比較欄只列同群組公司，避免跨產業數字失真。目前群組：<b>${esc(g||'未分組')}</b>，共 ${pool.length} 家可比較。</div>`;
-  h+=`<div class="bar">${[0,1,2,3].map(i=>`<div class="field"><label for="peer${i}">比較公司 ${i+1}</label><select id="peer${i}" data-chg="peer" data-i="${i}">${i===0?companyOptions(allIds,S.peer[0]):`<option value="">— 不比較 —</option>`+companyOptions(pool.filter(x=>x!==S.peer[0]),S.peer[i])}</select></div>`).join('')}</div>`;
-  const cols=S.peer.filter(Boolean).map(id=>({id,M:analyze(id)})).filter(x=>x.M);
+  const slots=[0,1,2,3].map(i=>{ const id=S.peer[i]; return id&&co(id)?{id,M:analyze(id)}:null; });
   const rows=[['營收年增率','revYoY',pct,1],['毛利率','gm',v=>pct(v,false),1],['營業利益率','om',v=>pct(v,false),1],['稅前淨利（淨損）','pti',yi,0],['每股盈餘（EPS）','eps',v=>nf(v)+' 元',0],['本益比（P/E）','pe',v=>nf(v)+'×',-1],['負債比率','debt',v=>pct(v,false),-1],['ROE（年化）','roe',v=>pct(v,false),1],['現金獲利比','cashRatio',v=>nf(v)+'×',1],['應收帳款增幅','arG',pct,0],['財報健康分','score',v=>v+' 分',1]];
-  h+=`<div class="tbl-wrap"><table><thead><tr><th>分析指標</th>${cols.map(c=>`<th>${esc(nameOf(c.id))} ${c.id}</th>`).join('')}${cols.length<4?Array(4-cols.length).fill('<th>等待加入同業</th>').join(''):''}</tr></thead><tbody>
-    ${rows.map(([t,k,f,dir])=>{const vals=cols.map(c=>c.M[k]); const valid=vals.filter(v=>v!=null&&isFinite(v)&&!(k==='pe'&&v<=0));
+  const sel=i=>`<label for="peer${i}" class="peer-l">比較公司 ${i+1}</label><select id="peer${i}" class="peer-s" data-chg="peer" data-i="${i}">${i===0?companyOptions(allIds,S.peer[0]):`<option value="">— 不比較 —</option>`+companyOptions(pool.filter(x=>x!==S.peer[0]),S.peer[i])}</select>`;
+  h+=`<div class="tbl-wrap"><table class="peer-t"><colgroup><col class="c0">${'<col class="cx">'.repeat(4)}</colgroup>
+    <thead><tr><th class="peer-h0">分析指標</th>${slots.map((c,i)=>`<th class="peer-h">${sel(i)}</th>`).join('')}</tr></thead><tbody>
+    ${rows.map(([t,k,f,dir])=>{const vals=slots.map(c=>c?c.M[k]:null); const valid=vals.filter(v=>v!=null&&isFinite(v)&&!(k==='pe'&&v<=0));
       const best=dir&&valid.length>1?(dir>0?Math.max(...valid):Math.min(...valid)):null;
-      return `<tr><td>${t}</td>${vals.map(v=>`<td class="num ${v===best?'best':''}">${f(v)}</td>`).join('')}${cols.length<4?Array(4-cols.length).fill('<td class="flat">—</td>').join(''):''}</tr>`}).join('')}
-    <tr><td>資料期間</td>${cols.map(c=>`<td style="font-size:12px;color:var(--muted)">${c.M.period}</td>`).join('')}${cols.length<4?Array(4-cols.length).fill('<td></td>').join(''):''}</tr></tbody></table></div>
-    <p style="font-size:12.5px;color:var(--muted)">綠色粗體為該列較佳者（本益比、負債比取較低者）。同群組公司數不足時，可在「管理類股群組」把更多公司加入同一群組。</p>`;
+      return `<tr><td>${t}</td>${slots.map((c,i)=>c?`<td class="num ${vals[i]===best?'best':''}">${f(vals[i])}</td>`:'<td class="flat">—</td>').join('')}</tr>`}).join('')}
+    <tr><td>資料期間</td>${slots.map(c=>`<td class="peer-p">${c?c.M.period:'—'}</td>`).join('')}</tr></tbody></table></div>
+    <p style="font-size:12.5px;color:var(--muted)">藍色粗體為該列較佳者（本益比、負債比取較低者）。同群組公司數不足時，可在「管理類股群組」把更多公司加入同一群組。</p>`;
   return h;
 }
 
