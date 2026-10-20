@@ -235,7 +235,7 @@ const FM = 'https://api.finmindtrade.com/api/v4/data?';
 const SEED_GROUPS = {'晶圓代工':['2330','2303'],'IC設計':['2454','3034','2379'],'AI 伺服器供應鏈':['2317','2382','3231','6669','2308']};
 const SEED_COMPANIES = ['2330','2303','2454','3034','2379','2317','2382','3231','6669','2308'];
 const NAV = [
-  ['health','⌁','財報健檢'],['watch','★','追蹤中個股'],['peer','▥','同業比較'],['tech','∿','技術分析'],
+  ['health','⌁','財報健檢'],['watch','★','追蹤中個股'],['signal','◆','追蹤個股訊號分析'],['peer','▥','同業比較'],['tech','∿','技術分析'],
   ['etf','◎','ETF 專區'],['brief','☀','每日早報'],['admin','▣','後台管理']
 ];
 const S = { direct:null,
@@ -380,7 +380,7 @@ function RSI(cl,n=14){ if(cl.length<=n) return null; let g=0,l=0;
 let saveQ=Promise.resolve();
 function persist(){
   if(!canWrite()) { toast('帳號尚未核准，變更不會保存'); return; }
-  const body={companies:S.me.companies, groups:S.me.groups, watch:S.me.watch, etfFav:S.me.etfFav, updatedAt:Date.now()};
+  const body={companies:S.me.companies, groups:S.me.groups, watch:S.me.watch, etfFav:S.me.etfFav, sig:S.me.sig||null, updatedAt:Date.now()};
   if(S.mode==='db' && S.db && S.uid){
     saveQ = saveQ.then(()=>S.db.doc('members/'+S.uid).set({...body, joinedAt:S.joinedAt||Date.now()})).catch(e=>toast('儲存失敗：'+(e.code||e.message)));
   } else { try{ localStorage.setItem('compass-me', JSON.stringify(body)); }catch(e){} }
@@ -959,6 +959,176 @@ function btCard({id,c,px,i,E,P}){
     <div><b>假突破檢查</b><div>${E.falseBO?'⚠ 出現疑似假突破，突破後收盤已跌回頸線下':E.b!=null?'突破後尚未跌回頸線，未見假突破':'尚未突破，暫無假突破問題'}</div>${E.notes.filter(n=>!/假突破：/.test(n)).map(n=>`<div>• ${n}</div>`).join('')}</div></div></div>`;
 }
 
+/* ---------- 追蹤個股訊號分析：止跌反轉四道閘門 ---------- */
+const SG={win:60, rebound:.05, pull:.03, surge:.04, gap:.02, volConv:.8, volBreak:1.3, retestDays:5, retestTol:.03, extend:.05, stopMax:.10, rr:2, timeStop:5};
+const DEF_CFG={capital:1000000, risk:1, buf:1};
+function sgCfg(){ return {...DEF_CFG, ...(S.me.sig||{})}; }
+function sgStruct(px,i){
+  const H_=x=>px[x][2], Lo=x=>px[x][3], C=x=>px[x][4];
+  const s=Math.max(0,i-SG.win+1);
+  let iP=s; for(let t=s;t<=i;t++) if(H_(t)>=H_(iP)) iP=t;
+  let iL=iP; for(let t=iP;t<=i;t++) if(Lo(t)<=Lo(iL)) iL=t;
+  const st={iP,iL,P:H_(iP),L:Lo(iL)};
+  let run=iL, k=null, pullAt=null;
+  for(let t=iL+1;t<=i;t++){ if(H_(t)>H_(run)) run=t;
+    if(H_(run)>=st.L*(1+SG.rebound) && t>run && Lo(t)<=H_(run)*(1-SG.pull)){ k=run; pullAt=t; break; } }
+  if(k==null){ st.Hc=null; for(let t=iL;t<=i;t++) if(st.Hc==null||H_(t)>st.Hc) st.Hc=H_(t); return st; }
+  st.k=k; st.H=H_(k);
+  let b=null; for(let t=pullAt;t<=i;t++) if(C(t)>st.H){ b=t; break; }
+  const end=b??i+1; let j2=pullAt; for(let t=pullAt;t<end;t++) if(Lo(t)<=Lo(j2)) j2=t;
+  st.j2=j2; st.L2=Lo(j2); st.b=b;
+  st.L2ok = j2<i || b!=null;   // 今日才出現的低點尚未確認
+  return st;
+}
+function signalEval(id,i0){
+  const c=co(id); if(!c) return null;
+  const px=adjPx(c.px); const i=i0??px.length-1;
+  const R={id,i,date:px[i]?.[0],gates:{},status:'尚未打底',alerts:[],notes:[]};
+  const it=(g,k,s,d)=>{ (R.gates[g]=R.gates[g]||{}).items=(R.gates[g].items||{}); R.gates[g].items[k]={s,d}; };
+  const mark=(g,k,l)=>{};
+  if(i<45){ R.status='資料不足'; return R; }
+  const H_=x=>px[x][2], Lo=x=>px[x][3], C=x=>px[x][4], O=x=>px[x][1], V=x=>px[x][5];
+  const cl=px.slice(0,i+1).map(x=>x[4]), vl=px.slice(0,i+1).map(x=>x[5]); const ma=(n,x)=>MA(cl,n,x), mv=(n,x)=>MA(vl,n,x);
+  const S0=sgStruct(px,i); Object.assign(R,{L:S0.L,P:S0.P,H:S0.H??null,L2:S0.L2??null,b:S0.b??null,iL:S0.iL,iP:S0.iP});
+  const close=C(i), chg=close/C(i-1)-1, dd=1-S0.L/S0.P;
+  if(dd<.1) R.notes.push(`自 ${px[S0.iP][0]} 高點 ${nf(S0.P)} 起的跌幅僅 ${(dd*100).toFixed(1)}%，非明顯下跌段，此框架參考性較低。`);
+  else R.notes.push(`下跌段：${px[S0.iP][0]} 高點 ${nf(S0.P)} → ${px[S0.iL][0]} 低點 L ${nf(S0.L)}（跌幅 ${(dd*100).toFixed(1)}%）。`);
+  // ── 閘門 1｜結構止跌
+  if(S0.H==null) it(1,'a', S0.iL>=i-1?'no':'no', S0.iL>=i-1?`${px[S0.iL][0]} 仍在創低，L = ${nf(S0.L)}`:`低點 L ${nf(S0.L)} 後最大反彈至 ${nf(S0.Hc)}（${pct(S0.Hc/S0.L-1)}），尚未形成 ≥ ${SG.rebound*100}% 的反彈`);
+  else it(1,'a','ok',`低點 L ${nf(S0.L)}（${px[S0.iL][0]}）後反彈至 H ${nf(S0.H)}（${pct(S0.H/S0.L-1)}）`);
+  if(S0.H==null) it(1,'b','no','尚未出現反彈後的回檔');
+  else if(!S0.L2ok) it(1,'b','no',`回檔進行中，今日低點 ${nf(S0.L2)} 尚待確認`);
+  else it(1,'b','ok',`第二低點 L2 ${nf(S0.L2)}（${px[S0.j2][0]}）高於 L ${nf(S0.L)}`);
+  const gapUp=O(i)>H_(i-1)*(1+SG.gap), big=chg>=SG.surge;
+  const formedToday = S0.b===i;
+  it(1,'c', (big||gapUp)&&(S0.H==null||!S0.L2ok||formedToday)?'no':'ok', (big||gapUp)?`今日${big?'大漲 '+pct(chg):''}${big&&gapUp?'且':''}${gapUp?'跳空開高':''}，${(S0.H==null||!S0.L2ok||formedToday)?'結構主要由單日走勢形成，不視為完成打底':'但結構在此之前已成形'}`:`今日 ${pct(chg)}，非單日長紅造成`);
+  // ── 閘門 2｜量價確認
+  const avg=(a,b)=>{ if(b<=a) return null; let x=0; for(let t=a;t<b;t++) x+=V(t); return x/(b-a); };
+  const decV=avg(S0.iP,S0.iL+1);
+  if(S0.L2==null){ const n=Math.floor((S0.iL-S0.iP)/3); if(n<3) it(2,'a','na','下跌段太短，無法比較量能'); else { const v1=avg(S0.iP,S0.iP+n), v3=avg(S0.iL-n+1,S0.iL+1); it(2,'a', v3<v1*SG.volConv?'ok':'no', `下跌段末段均量為前段的 ${(v3/v1*100).toFixed(0)}%（回測尚未出現）`); } }
+  else { const pv=avg(S0.k+1,S0.j2+1); it(2,'a', pv!=null&&decV&&pv<decV*SG.volConv?'ok':'no', `回測段均量為下跌段的 ${pv&&decV?(pv/decV*100).toFixed(0):'—'}%${pv<decV*SG.volConv?'，賣壓收斂':'，量能未明顯收斂'}`); }
+  if(S0.b==null) it(2,'b','no', S0.H==null?'尚無反彈高點 H 可突破':`收盤 ${nf(close)} 尚未突破 H ${nf(S0.H)}`);
+  else { const r=V(S0.b)/mv(20,S0.b-1); R.volRatio=r; it(2,'b', r>=SG.volBreak?'ok':'no', `${px[S0.b][0]} 突破量為 20 日均量的 ${r.toFixed(2)} 倍${r>=SG.volBreak?'':'（未達 '+SG.volBreak+' 倍，無量突破）'}`); }
+  let blow=null; for(let t=Math.max(S0.iL,i-9);t<=i;t++){ if(t===S0.b) continue; if(V(t)>=mv(20,t-1)*2 && C(t)<=O(t) && (S0.H==null||C(t)<=S0.H)) blow=t; }
+  if(blow!=null) it(2,'c','no',`${px[blow][0]} 爆量（${(V(blow)/mv(20,blow-1)).toFixed(1)} 倍）但收黑未突破，爆量不漲`);
+  else if(S0.b!=null&&R.gates[2].items.b.s==='ok') it(2,'c','ok','放量與價格突破發生在同一天');
+  else it(2,'c','no','尚無「帶量突破」可確認');
+  // ── 閘門 3｜趨勢與均線
+  const m5=ma(5,i), m10=ma(10,i), m20=ma(20,i);
+  it(3,'a', close>m10&&close>m20?'ok':'no', `收盤 ${nf(close)}｜MA10 ${nf(m10)}｜MA20 ${nf(m20)}`);
+  const m5up=m5>ma(5,i-1);
+  it(3,'b', m5up||close>m10?'ok':'no', `MA5 ${m5up?'上彎':'下彎'}（${nf(ma(5,i-1))} → ${nf(m5)}）${close>m10?'，且站上 MA10':''}`);
+  if(S0.b==null) it(3,'c','no', S0.H==null?'尚無前波反彈高點 H':`H ${nf(S0.H)}，距離 ${pct(S0.H/close-1,false)}`);
+  else if(close<S0.H) it(3,'c','no',`${px[S0.b][0]} 曾突破 H ${nf(S0.H)}，但目前收盤 ${nf(close)} 已跌回 H 下方`);
+  else it(3,'c','ok',`${px[S0.b][0]} 收盤突破 H ${nf(S0.H)}，目前仍在其上`);
+  if(S0.b==null||close<S0.H) it(3,'d','no','尚未有效突破，無回測可確認');
+  else { let tested=null; for(let t=S0.b+1;t<=Math.min(i,S0.b+SG.retestDays);t++) if(Lo(t)<=S0.H*(1+SG.retestTol)) tested=t;
+    let broke=false; for(let t=S0.b+1;t<=i;t++) if(C(t)<S0.H*(1-SG.retestTol)) broke=true;
+    it(3,'d', tested!=null&&!broke?'ok':'no', tested!=null?`${px[tested][0]} 回測至 ${nf(Lo(tested))}，收盤守住 H`:i-S0.b<1?'今日剛突破，尚待回測':`突破後 ${i-S0.b} 日內尚未回測 H 附近`); }
+  const m20s=ma(20,i)/ma(20,i-5)-1; R.ma20slope=m20s;
+  if(m20s<-.01) R.notes.push(`20 日均線 5 日內下彎 ${pct(m20s,false)}，即使突破也較適合視為「反彈」而非完整反轉。`);
+  // ── 閘門 4｜交易可行性與風險控制
+  const cfg=sgCfg();
+  const entry = S0.b!=null&&close>=S0.H ? close : (S0.H??null);
+  R.entry=entry;
+  if(S0.L2==null||!S0.L2ok){ it(4,'a','no','尚無確認的 L2，無法設定停損'); }
+  else { R.stop=S0.L2*(1-cfg.buf/100); R.stopPct=entry?1-R.stop/entry:null; it(4,'a', R.stopPct!=null&&R.stopPct<=SG.stopMax?'ok':'no', `停損設於 L2 下方 ${cfg.buf}%：${nf(R.stop)}（距${S0.b!=null&&close>=S0.H?'現價':'突破價 H'} ${pct(R.stopPct,false)}）${R.stopPct>SG.stopMax?'，停損距離過遠':''}`); }
+  if(R.stop!=null&&entry){ const cand=[S0.P, S0.H+(S0.H-S0.L)].filter(v=>v>entry*1.01).sort((a,b)=>a-b); R.target=cand[0]??null;
+    R.rr = R.target? (R.target-entry)/(entry-R.stop) : null;
+    it(4,'b', R.rr!=null&&R.rr>=SG.rr?'ok':'no', R.target?`第一目標 ${nf(R.target)}（${R.target===S0.P?'下跌起點高點':'等幅測距 H＋(H−L)'}），報酬風險比 ${R.rr.toFixed(2)} : 1`:'上方已無明確目標價，無法計算報酬風險比'); }
+  else it(4,'b','no','缺停損或進場價，無法計算報酬風險比');
+  if(R.stopPct){ const loss=cfg.capital*cfg.risk/100, pos=loss/R.stopPct; R.loss=loss; R.pos=pos; R.lots=Math.floor(pos/(entry*1000)); R.odd=Math.floor(pos/entry);
+    it(4,'c', R.stopPct<=SG.stopMax?'ok':'no', `可承受損失 ${nf(loss,0)} 元 ÷ 停損 ${pct(R.stopPct,false)} ＝ 部位上限 ${nf(pos,0)} 元（約 ${R.lots>=1?R.lots+' 張':nf(R.odd,0)+' 股零股'}）`); }
+  else it(4,'c','no','停損未定義，無法計算部位');
+  if(S0.b!=null&&close>=S0.H){ const ext=close/S0.H-1; it(4,'d', ext<=SG.extend?'ok':'no', ext<=SG.extend?`距突破區 H ${pct(ext)}，位置合理`:`距突破區 H 已 ${pct(ext)}，過度延伸，宜等回測`); }
+  else it(4,'d','na','尚未突破，進場位置待定');
+  const env=marketEnv(px[i][0], id); R.env=env;
+  it(4,'e', env.ok?'ok':'no', env.text);
+  // gate pass flags
+  for(const g of [1,2,3,4]) R.gates[g].pass=Object.values(R.gates[g].items).every(x=>x.s==='ok'||(g===4&&x.s==='na'&&false));
+  R.gates[4].pass=['a','b','c','d','e'].every(k=>R.gates[4].items[k].s==='ok');
+  // ── 失效與退出
+  if(S0.b!=null&&close<S0.H){ R.invalid='疑似假突破'; R.alerts.push(['bad',`突破 H ${nf(S0.H)} 後收盤跌回 H 下方：停止加碼，降低部位或退出。`]); }
+  if(i>0){ const P1=sgStruct(px,i-1); if(P1.L2!=null&&P1.L2ok&&close<P1.L2){ R.invalid='跌破 L2'; R.alerts.push(['bad',`收盤 ${nf(close)} 跌破前一日的 L2 ${nf(P1.L2)}：技術假設失效，執行停損，不攤平。`]); } }
+  if(S0.b!=null&&close>=S0.H&&i-S0.b>=SG.timeStop){ let mx=0; for(let t=S0.b+1;t<=i;t++) mx=Math.max(mx,H_(t)); if(mx<=H_(S0.b)) R.alerts.push(['warn',`突破後已 ${i-S0.b} 個交易日未創新高：符合時間停損條件，考慮縮減或退出。`]); }
+  if(gapUp&&chg<0||O(i)<Lo(i-1)*(1-SG.gap)) R.alerts.push(['warn','今日出現跳空缺口，停損不保證成交在設定價位，請依部位紀律處理。']);
+  // ── 狀態
+  const g1=R.gates[1].pass, g2=R.gates[2].pass, g3=R.gates[3].pass, g4=R.gates[4].items.b.s==='ok';
+  if(R.invalid) R.status='失效／疑似假突破';
+  else if(!g1) R.status='尚未打底';
+  else if(S0.b==null) R.status='初步止跌';
+  else if(g2&&g3&&R.gates[4].pass) R.status='可評估進場';
+  else R.status='打底待確認';
+  R.rsi=RSI(cl.slice(-120));
+  return R;
+}
+function marketEnv(date, id){
+  const T=taiex(); const i=T.findIndex(x=>x[0]===date); let ok=true; const parts=[];
+  if(i>=10){ const r5=T[i][4]/T[i-5][4]-1, r10=T[i][4]/T[i-10][4]-1; const crash=r5<=-.04||r10<=-.06; if(crash) ok=false;
+    parts.push(`加權指數 5 日 ${pct(r5)}、10 日 ${pct(r10)}${crash?'，屬急跌段':''}`); } else parts.push('大盤資料不足');
+  const g=groupOf(id); if(g){ const peers=(S.me.groups[g]||[]).filter(x=>co(x)); const rs=peers.map(x=>{const p=adjPx(co(x).px); const k=p.findIndex(y=>y[0]===date); return k>=5?p[k][4]/p[k-5][4]-1:null}).filter(v=>v!=null);
+    if(rs.length>=2){ const a=rs.reduce((x,y)=>x+y,0)/rs.length; if(a<=-.06) ok=false; parts.push(`「${g}」群組 ${rs.length} 檔 5 日平均 ${pct(a)}${a<=-.06?'，族群急跌':''}`); } }
+  return {ok, text:parts.join('；')+(ok?'，環境可交易':'，宜降低部位或暫不交易')};
+}
+const SG_GATES=[[1,'閘門 1｜結構止跌',[['a','低點 L 後形成反彈'],['b','第二低點 L2 不低於 L'],['c','非單日長紅、跳空造成']]],
+ [2,'閘門 2｜量價確認',[['a','下跌與回測量能收斂'],['b','突破 H 時量 ≥ 20 日均量 1.3 倍'],['c','放量與突破同步，無爆量不漲']]],
+ [3,'閘門 3｜趨勢與均線',[['a','收盤站上 MA10、MA20'],['b','MA5 上彎或站上 MA10'],['c','收盤突破前波反彈高點 H'],['d','突破後回測 H 不破']]],
+ [4,'閘門 4｜交易可行性與風控',[['a','停損位已定義（L2 下方）'],['b','報酬風險比 ≥ 2 : 1'],['c','單筆損失 ≤ 設定比例'],['d','未過度延伸（距 H ≤ 5%）'],['e','大盤與族群非急跌']]]];
+const SG_TONE={'尚未打底':'bad','初步止跌':'warn','打底待確認':'info','可評估進場':'good','失效／疑似假突破':'bad','資料不足':'na'};
+function sgBadge(s){ const t=SG_TONE[s]; return `<span class="st ${t==='info'?'':t}" style="${t==='info'?'background:var(--accent-soft);color:var(--accent)':''}">${s}</span>`; }
+function viewSignal(){
+  const cfg=sgCfg();
+  let h=topbar('Watchlist signal analysis','追蹤個股訊號分析',`<button class="btn" data-act="updWatch">↻ 更新追蹤個股</button>`);
+  h+=`<p style="margin:-8px 0 14px;color:var(--muted);font-size:14px;max-width:80ch">依「止跌反轉進場四道閘門」逐一檢查追蹤中個股。技術三閘門是<b>進場資格</b>，不是買進指令；必須先定義停損、報酬風險比至少 2 : 1 才能評估進場。RSI、KD 只作輔助觀察。</p>`;
+  h+=`<div class="bar"><div class="field"><label for="cfgCap">總資金（元）</label><input id="cfgCap" type="number" min="10000" step="10000" data-chg="cfg" data-k="capital" value="${cfg.capital}"></div>
+    <div class="field"><label for="cfgRisk">單筆風險（%）</label><select id="cfgRisk" data-chg="cfg" data-k="risk">${[0.5,0.75,1].map(v=>`<option value="${v}" ${cfg.risk==v?'selected':''}>${v}%</option>`).join('')}</select></div>
+    <div class="field"><label for="cfgBuf">停損設在 L2 下方（%）</label><select id="cfgBuf" data-chg="cfg" data-k="buf">${[0.5,1,2,3].map(v=>`<option value="${v}" ${cfg.buf==v?'selected':''}>${v}%</option>`).join('')}</select></div>
+    <span style="font-size:13px;color:var(--muted)">單筆最大損失 <b class="num" style="color:var(--ink)">${nf(cfg.capital*cfg.risk/100,0)}</b> 元</span></div>`;
+  if(!S.me.watch.length) return h+`<div class="empty">☆<b>尚未追蹤任何個股</b>在「財報健檢」按「加入追蹤」，這裡就會出現四道閘門的檢查結果。<div style="margin-top:12px"><button class="btn pri" data-act="nav" data-v="health">前往財報健檢</button></div></div>`;
+  const rows=S.me.watch.map(id=>{ const E=signalEval(id); const P=E&&E.i>0?signalEval(id,E.i-1):null; return {id,E,P}; }).filter(r=>r.E);
+  const order={'可評估進場':0,'打底待確認':1,'初步止跌':2,'失效／疑似假突破':3,'尚未打底':4,'資料不足':5};
+  rows.sort((a,b)=>order[a.E.status]-order[b.E.status]);
+  const env=rows[0]?.E.env; const T=taiex(); 
+  if(env&&!env.ok) h+=`<div class="banner warn"><b>大盤或族群處於急跌環境</b>　${esc(env.text)}。依紀律，所有個股的閘門 4 皆暫不通過。</div>`;
+  const cnt=k=>rows.filter(r=>r.E.status===k).length;
+  h+=`<div class="kpis">${['可評估進場','打底待確認','初步止跌','尚未打底'].map(k=>`<div class="kpi"><small>${k}</small><b>${cnt(k)}</b><span>${k==='尚未打底'?'另有失效 '+cnt('失效／疑似假突破')+' 檔':'檔'}</span></div>`).join('')}</div>`;
+  h+=`<div class="tbl-wrap" style="margin-bottom:14px"><table><thead><tr><th>公司</th><th>狀態</th><th>前一交易日</th><th>閘門 1</th><th>閘門 2</th><th>閘門 3</th><th>閘門 4</th><th>收盤</th><th>H</th><th>停損</th><th>報酬風險比</th></tr></thead><tbody>
+    ${rows.map(({id,E,P})=>`<tr><td><a href="#sg-${id}" data-act="sgJump" data-id="${id}" style="color:inherit"><span class="num">${id}</span> ${esc(nameOf(id))}</a></td><td style="text-align:left">${sgBadge(E.status)}</td><td style="text-align:left;opacity:.75">${P?sgBadge(P.status):'—'}</td>
+      ${[1,2,3,4].map(g=>`<td>${E.gates[g]?(E.gates[g].pass?'<span class="st good">通過</span>':'<span class="st na">'+Object.values(E.gates[g].items).filter(x=>x.s==='ok').length+'/'+Object.keys(E.gates[g].items).length+'</span>'):'—'}</td>`).join('')}
+      <td class="num">${nf(adjPx(co(id).px)[E.i][4])}</td><td class="num">${E.H!=null?nf(E.H):'—'}</td><td class="num">${E.stop!=null?nf(E.stop):'—'}</td><td class="num">${E.rr!=null?E.rr.toFixed(2)+' : 1':'—'}</td></tr>`).join('')}</tbody></table></div>`;
+  h+=`<div class="bt-list">${rows.map(sgCard).join('')}</div>`;
+  h+=`<div class="foot-notes"><div class="panel"><p><b>部位公式</b>　可承受損失 ＝ 總資金 × 單筆風險比例；部位上限 ＝ 可承受損失 ÷ 停損百分比。例：100 萬 × 1% ÷ 8% ≈ 12.5 萬元。</p></div>
+    <div class="panel"><p><b>分批執行</b>　首次 50%：收盤突破 H 且量符合閘門 2。加碼 50%：之後 1–5 日回測 H 附近、收盤守住再加碼。離突破區過遠不追價。</p></div>
+    <div class="panel"><p><b>適用範圍</b>　適合 5–30 個交易日的波段判斷，不適合長期投資或低流動性標的。規則未經回測驗證，不保證反轉成功，也不構成投資建議。</p></div></div>`;
+  return h;
+}
+function sgCard({id,E,P}){
+  const px=adjPx(co(id).px), i=E.i, close=px[i][4], chg=close/px[i-1][4]-1;
+  const diffs=[]; if(P){ if(P.status!==E.status) diffs.push(`狀態：${P.status} → <b>${E.status}</b>`);
+    for(const g of [1,2,3,4]) for(const k of Object.keys(E.gates[g]?.items||{})){ const a=P.gates[g]?.items?.[k]?.s, b=E.gates[g].items[k].s; if(a&&a!==b){ const lab=SG_GATES[g-1][2].find(x=>x[0]===k)[1]; diffs.push(`閘門 ${g}「${lab}」：${ST3[a]} → <b>${ST3[b]}</b>`);} } }
+  const lv=[['L 前低',E.L],['L2 第二低',E.L2],['H 反彈高',E.H],['停損',E.stop],['第一目標',E.target]];
+  const half=E.lots>=2?Math.floor(E.lots/2)+' 張':E.odd?nf(Math.floor(E.odd/2),0)+' 股':'—';
+  return `<div class="panel bt" id="sg-${id}"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
+    <div><b style="font-size:17px">${esc(nameOf(id))}</b> <span class="num" style="color:var(--muted)">${id}</span>　<span class="num">${nf(close)}</span> <span class="num ${cls(chg)}">${pct(chg,true,2)}</span> <span class="cap">${E.date}</span></div><div>${sgBadge(E.status)}</div></div>
+    <div class="bt-grid"><div>${sgSpark(px,i,E)}
+      <div class="mini" style="grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px">${lv.map(([t,v])=>`<div>${t}<b>${v!=null?nf(v):'—'}</b></div>`).join('')}<div>報酬風險比<b>${E.rr!=null?E.rr.toFixed(2)+' : 1':'—'}</b></div></div>
+      ${E.pos?`<div class="panel" style="margin-top:10px;background:var(--sunk);border:0;padding:10px 12px;font-size:13px"><b>部位試算</b><div>可承受損失 ${nf(E.loss,0)} 元，部位上限 ${nf(E.pos,0)} 元</div><div>首次 50%：約 ${half}（收盤突破 H ${E.H?nf(E.H):''} 且量 ≥ 1.3 倍）</div><div>加碼 50%：約 ${half}（1–5 日內回測 H 守住）</div></div>`:''}
+      <p class="cap" style="margin:8px 0 0">RSI 14：${nf(E.rsi,1)}（僅輔助觀察，不作為見底依據）</p></div>
+    <div>${SG_GATES.map(([g,t,ks])=>`<div class="bt-rule"><div class="bt-rt" style="display:flex;justify-content:space-between"><span>${t}</span>${E.gates[g]?.pass?'<span class="st good">通過</span>':'<span class="st na">未通過</span>'}</div>${ks.map(([k,l])=>{const x=E.gates[g]?.items?.[k]||{s:'na',d:'—'}; return `<div class="bt-it"><span class="st ${x.s==='ok'?'good':x.s==='no'?'warn':'na'}">${ST3[x.s]}</span><div><b>${l}</b><small>${x.d}</small></div></div>`}).join('')}</div>`).join('')}</div></div>
+    ${E.alerts.length?`<div style="margin-top:10px">${E.alerts.map(([t,m])=>`<div class="banner ${t==='bad'?'warn':''}" style="margin:6px 0 0">⚠ ${m}</div>`).join('')}</div>`:''}
+    <div class="bt-foot"><div><b>與前一交易日差異</b>${diffs.length?diffs.map(d=>`<div>• ${d}</div>`).join(''):'<div>• 各項判定與前一交易日相同</div>'}</div>
+      <div><b>仍欠缺的條件</b><div>${SG_GATES.flatMap(([g,t,ks])=>ks.filter(([k])=>E.gates[g]?.items?.[k]?.s!=='ok').map(([k,l])=>`${g}-${l}`)).join('、')||'四道閘門皆已通過'}</div></div>
+      <div><b>結構備註</b>${E.notes.map(n=>`<div>• ${n}</div>`).join('')}</div></div></div>`;
+}
+function sgSpark(px,i,E){
+  const s=Math.max(0,i-79), seg=px.slice(s,i+1), W=360,H=120,P=4;
+  const vals=[...seg.map(x=>x[2]),...seg.map(x=>x[3])]; if(E.stop) vals.push(E.stop); if(E.target&&E.target<Math.max(...vals)*1.15) vals.push(E.target);
+  const hi=Math.max(...vals), lo=Math.min(...vals), r=hi-lo||1, X=t=>P+(t/(seg.length-1))*(W-2*P), Y=v=>P+(hi-v)/r*(H-2*P);
+  const ln=(v,col,t)=>v==null||v>hi||v<lo?'':`<line x1="${P}" x2="${W-P}" y1="${Y(v)}" y2="${Y(v)}" stroke="${col}" stroke-dasharray="4 3"/><text x="${P+2}" y="${Y(v)-3}">${t} ${nf(v)}</text>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" style="height:${H}px" role="img" aria-label="近 80 日收盤與關鍵價位">${ln(E.L,'var(--down)','L')}${ln(E.L2&&E.L2!==E.L?E.L2:null,'var(--down)','L2')}${ln(E.H,'var(--accent)','H')}${ln(E.stop,'var(--bad)','停損')}${ln(E.target,'var(--good)','目標')}
+    <polyline points="${seg.map((x,t)=>X(t)+','+Y(x[4])).join(' ')}" fill="none" stroke="var(--ink)" stroke-width="1.6"/><circle cx="${X(seg.length-1)}" cy="${Y(seg.at(-1)[4])}" r="3" fill="var(--ink)"/></svg>`;
+}
+
 /* ---------- 視圖：後台 ---------- */
 function viewAdmin(){
   let h=topbar('Administration','使用者與資料管理');
@@ -1006,6 +1176,8 @@ const A={
   updAll:()=>runUpdate(scopeIds(),'更新全部公司'), updOne:()=>runUpdate([S.sel],'更新 '+nameOf(S.sel)), updMarket:()=>updateMarket(),
   open:d=>{S.sel=d.id; S.scope='all'; A.nav({v:'health'});}, goTech:d=>{S.tech.id=d.id; A.nav({v:'tech'});},
   days:d=>{S.tech.days=+d.v; render();},
+  sgJump:d=>{ document.getElementById('sg-'+d.id)?.scrollIntoView({behavior:'smooth',block:'start'}); },
+  updWatch:()=>runUpdate(S.me.watch.filter(id=>S.me.companies.includes(id)),'更新追蹤個股'),
   btJump:d=>{ document.getElementById('bt-'+d.id)?.scrollIntoView({behavior:'smooth',block:'start'}); },
   etfFav:d=>{const f=S.me.etfFav,i=f.indexOf(d.id); i<0?f.push(d.id):f.splice(i,1); persist(); render();},
   etfFavOnly:()=>{S.etf.fav=!S.etf.fav; render();}, etfAll:()=>{S.etf.all=!S.etf.all; render();},
@@ -1023,6 +1195,7 @@ const CHG={
   peer:(v,d)=>{ const i=+d.i; if(i===0){S.sel=v; S.peer=[];} else S.peer[i]=v||null; render(); },
   et:v=>{S.etf.type=v; render();}, em:v=>{S.etf.mkt=v; render();}, es:v=>{S.etf.sort=v; render();}, bd:v=>{S.brief.date=v.slice(0,10); render();},
   cmp:(v,d,el)=>{ const c=S.etf.cmp; const i=c.indexOf(d.id); if(el.checked&&i<0){ if(c.length>=3){el.checked=false; toast('最多比較 3 檔'); return;} c.push(d.id);} else if(!el.checked&&i>=0) c.splice(i,1); render(); },
+  cfg:(v,d)=>{ const n=+v; if(!(n>0)) return; S.me.sig={...sgCfg(),[d.k]:n}; persist(); render(); },
   assign:(v,d)=>{ for(const g in S.me.groups) S.me.groups[g]=S.me.groups[g].filter(x=>x!==d.id); if(v) S.me.groups[v].push(d.id); persist(); render(); }
 };
 const INP={ q:v=>{S.q=v; renderKeep('q');}, eq:v=>{S.etf.q=v; renderKeep('eq');}, aq:v=>addCoModal(v.trim()) };
@@ -1044,7 +1217,7 @@ window.addEventListener('hashchange',()=>{ if(readHash()){ closeModal(); render(
 window.addEventListener('popstate',()=>{ if(readHash()){ closeModal(); render(); } });
 function render(push){
   $('#nav').innerHTML=NAV.filter(([v])=>v!=='admin'||S.canEdit).map(([v,ic,t])=>`<button data-act="nav" data-v="${v}" ${S.view===v?'aria-current="page"':''}><span class="ic">${ic}</span>${t}${v==='etf'?'<span class="tag">V09</span>':''}</button>`).join('');
-  const V={health:viewHealth,watch:viewWatch,peer:viewPeer,tech:viewTech,etf:viewEtf,brief:viewBrief,admin:viewAdmin}[S.view]||viewHealth;
+  const V={health:viewHealth,watch:viewWatch,signal:viewSignal,peer:viewPeer,tech:viewTech,etf:viewEtf,brief:viewBrief,admin:viewAdmin}[S.view]||viewHealth;
   let pre='';
   if(S.mode==='db'&&!canWrite()) pre=`<div class="banner warn">你的帳號正在等待管理者核准。核准前可以瀏覽內建資料，但加入公司、追蹤與快照不會保存。</div>`;
   $('#main').innerHTML=pre+V();
@@ -1073,7 +1246,7 @@ render();
       const me=await user.me(); $('#who').textContent=(me.name||'已登入')+(S.isOwner?'（擁有者）':''); $('#whoNote').textContent='清單跟著帳號同步';
       try{
         const snap=await db.doc('members/'+uid).get();
-        if(snap.exists){ const d=snap.data(); S.joinedAt=d.joinedAt; S.me={companies:d.companies||[],groups:d.groups||{},watch:d.watch||[],etfFav:d.etfFav||[]}; }
+        if(snap.exists){ const d=snap.data(); S.joinedAt=d.joinedAt; S.me={companies:d.companies||[],groups:d.groups||{},watch:d.watch||[],etfFav:d.etfFav||[],sig:d.sig||null}; }
         else { S.joinedAt=Date.now(); await db.doc('members/'+uid).set({...S.me, joinedAt:S.joinedAt, updatedAt:Date.now()}).catch(()=>{}); }
       }catch(e){}
       if(!S.me.companies.includes(S.sel)) S.sel=S.me.companies[0];
