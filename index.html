@@ -165,6 +165,9 @@ td.best{color:var(--good);font-weight:700}
 .steps .panel p{margin:0;font-size:13px;color:var(--muted)}
 .cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
 .cardc{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.cardc.wc{cursor:pointer;transition:border-color .15s}
+.cardc.wc:hover{border-color:var(--accent)}
+.cardc.wc:focus-visible{outline:2px solid var(--accent)}
 .cardc .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .mini{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;font-size:12px;color:var(--muted)}
 .mini b{display:block;color:var(--ink);font-family:var(--f-num);font-size:14px}
@@ -235,7 +238,7 @@ const FM = 'https://api.finmindtrade.com/api/v4/data?';
 const SEED_GROUPS = {'晶圓代工':['2330','2303'],'IC設計':['2454','3034','2379'],'AI 伺服器供應鏈':['2317','2382','3231','6669','2308']};
 const SEED_COMPANIES = ['2330','2303','2454','3034','2379','2317','2382','3231','6669','2308'];
 const NAV = [
-  ['health','⌁','財報健檢'],['watch','★','追蹤中個股'],['signal','◆','追蹤個股訊號分析'],['peer','▥','同業比較'],['tech','∿','技術分析'],
+  ['health','⌁','財報健檢'],['watch','★','追蹤中個股'],['peer','▥','同業比較'],['tech','∿','技術分析'],
   ['etf','◎','ETF 專區'],['brief','☀','每日早報'],['admin','▣','後台管理']
 ];
 const S = { direct:null,
@@ -380,7 +383,7 @@ function RSI(cl,n=14){ if(cl.length<=n) return null; let g=0,l=0;
 let saveQ=Promise.resolve();
 function persist(){
   if(!canWrite()) { toast('帳號尚未核准，變更不會保存'); return; }
-  const body={companies:S.me.companies, groups:S.me.groups, watch:S.me.watch, etfFav:S.me.etfFav, sig:S.me.sig||null, updatedAt:Date.now()};
+  const body={companies:S.me.companies, groups:S.me.groups, watch:S.me.watch, etfFav:S.me.etfFav, sig:S.me.sig||null, sigBy:S.me.sigBy||{}, updatedAt:Date.now()};
   if(S.mode==='db' && S.db && S.uid){
     saveQ = saveQ.then(()=>S.db.doc('members/'+S.uid).set({...body, joinedAt:S.joinedAt||Date.now()})).catch(e=>toast('儲存失敗：'+(e.code||e.message)));
   } else { try{ localStorage.setItem('compass-me', JSON.stringify(body)); }catch(e){} }
@@ -641,13 +644,21 @@ function chipSection(id){
 
 /* ---------- 視圖：追蹤 ---------- */
 function viewWatch(){
-  let h=topbar('Personal learning center','追蹤中個股',`<button class="btn gold" data-act="addCo">＋ 自動加入公司</button>`);
+  let h=topbar('Personal learning center','追蹤中個股',`<button class="btn" data-act="updWatch">↻ 更新追蹤個股</button><button class="btn gold" data-act="addCo">＋ 自動加入公司</button>`);
   if(!S.me.watch.length) return h+`<div class="empty">☆<b>尚未追蹤任何個股</b>在「財報健檢」查看公司時，按「加入追蹤」即可集中管理。<div style="margin-top:12px"><button class="btn pri" data-act="nav" data-v="health">前往財報健檢</button></div></div>`;
-  h+=`<div class="cards">${S.me.watch.map(id=>{const M=analyze(id); if(!M) return `<div class="cardc"><b>${esc(nameOf(id))} ${id}</b><span class="cap">尚無資料</span></div>`;
-    return `<div class="cardc"><div class="row"><div><b style="font-size:17px">${esc(nameOf(id))}</b> <span class="num" style="color:var(--muted)">${id}</span></div>${ringMini(M.score)}</div>
+  const rows=S.me.watch.map(id=>({id,M:analyze(id),E:co(id)?signalEval(id):null}));
+  const env=rows.find(r=>r.E)?.E.env;
+  h+=`<p style="margin:-8px 0 14px;color:var(--muted);font-size:14px">點選個股卡片，進入該股的「止跌反轉四道閘門」訊號分析與部位試算。</p>`;
+  if(env&&!env.ok) h+=`<div class="banner warn"><b>大盤處於急跌環境</b>　${esc(env.text.split('；')[0])}，所有個股的閘門 4 暫不通過。</div>`;
+  const cnt=k=>rows.filter(r=>r.E?.status===k).length;
+  h+=`<div class="kpis">${[['可評估進場','good'],['打底待確認','info'],['初步止跌','warn'],['尚未打底','bad']].map(([k])=>`<div class="kpi"><small>${k}</small><b>${cnt(k)}</b><span>${k==='尚未打底'?'另有失效 '+cnt('失效／疑似假突破')+' 檔':'檔'}</span></div>`).join('')}</div>`;
+  h+=`<div class="cards">${rows.map(({id,M,E})=>{ if(!M) return `<div class="cardc"><b>${esc(nameOf(id))} ${id}</b><span class="cap">尚無資料，請按「更新追蹤個股」</span></div>`;
+    return `<div class="cardc wc" data-act="sgOpen" data-id="${id}" role="button" tabindex="0" aria-label="查看 ${esc(nameOf(id))} 訊號分析">
+    <div class="row"><div><b style="font-size:17px">${esc(nameOf(id))}</b> <span class="num" style="color:var(--muted)">${id}</span></div>${ringMini(M.score)}</div>
     <div class="row"><span class="num" style="font-size:22px;font-weight:600">${nf(M.price,2)}</span><span class="num ${cls(M.chg)}">${pct(M.chg,true,2)}</span></div>
-    <div class="mini"><div>營收年增<b class="${cls(M.revYoY)}">${pct(M.revYoY)}</b></div><div>營益率<b>${pct(M.om,false)}</b></div><div>本益比<b>${nf(M.pe,1)}×</b></div></div>
-    <div class="row"><button class="btn sm" data-act="open" data-id="${id}">財報健檢</button><button class="btn sm" data-act="goTech" data-id="${id}">技術走勢</button><button class="btn sm ghost" data-act="watch" data-id="${id}">取消追蹤</button></div></div>`}).join('')}</div>`;
+    <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">${E?sgBadge(E.status):''}${E?[1,2,3,4].map(g=>`<span class="tg" style="${E.gates[g]?.pass?'border-color:var(--good);color:var(--good)':''}">閘門${g} ${E.gates[g]?.pass?'✓':Object.values(E.gates[g]?.items||{}).filter(x=>x.s==='ok').length+'/'+Object.keys(E.gates[g]?.items||{}).length}</span>`).join(''):''}</div>
+    <div class="mini"><div>營收年增<b class="${cls(M.revYoY)}">${pct(M.revYoY)}</b></div><div>本益比<b>${nf(M.pe,1)}×</b></div><div>報酬風險比<b>${E?.rr!=null?E.rr.toFixed(2)+' : 1':'—'}</b></div></div>
+    <div class="row"><span style="font-size:13px;color:var(--accent);font-weight:500">查看訊號分析 →</span><span style="display:flex;gap:6px"><button class="btn sm" data-act="open" data-id="${id}">財報</button><button class="btn sm" data-act="goTech" data-id="${id}">走勢</button><button class="btn sm ghost" data-act="watch" data-id="${id}">取消追蹤</button></span></div></div>`}).join('')}</div>`;
   return h;
 }
 function ringMini(s){ const col=s>=80?'var(--good)':s>=60?'var(--warn)':'var(--bad)'; return `<span class="num" style="border:2px solid ${col};color:${col};border-radius:99px;padding:1px 9px;font-weight:600">${s} 分</span>`; }
@@ -962,7 +973,7 @@ function btCard({id,c,px,i,E,P}){
 /* ---------- 追蹤個股訊號分析：止跌反轉四道閘門 ---------- */
 const SG={win:60, rebound:.05, pull:.03, surge:.04, gap:.02, volConv:.8, volBreak:1.3, retestDays:5, retestTol:.03, extend:.05, stopMax:.10, rr:2, timeStop:5};
 const DEF_CFG={capital:1000000, risk:1, buf:1};
-function sgCfg(){ return {...DEF_CFG, ...(S.me.sig||{})}; }
+function sgCfg(id){ return {...DEF_CFG, ...(S.me.sig||{}), ...((id&&S.me.sigBy?.[id])||{})}; }
 function sgStruct(px,i){
   const H_=x=>px[x][2], Lo=x=>px[x][3], C=x=>px[x][4];
   const s=Math.max(0,i-SG.win+1);
@@ -1029,7 +1040,7 @@ function signalEval(id,i0){
   const m20s=ma(20,i)/ma(20,i-5)-1; R.ma20slope=m20s;
   if(m20s<-.01) R.notes.push(`20 日均線 5 日內下彎 ${pct(m20s,false)}，即使突破也較適合視為「反彈」而非完整反轉。`);
   // ── 閘門 4｜交易可行性與風險控制
-  const cfg=sgCfg();
+  const cfg=sgCfg(id);
   const entry = S0.b!=null&&close>=S0.H ? close : (S0.H??null);
   R.entry=entry;
   if(S0.L2==null||!S0.L2ok){ it(4,'a','no','尚無確認的 L2，無法設定停損'); }
@@ -1078,26 +1089,20 @@ const SG_GATES=[[1,'閘門 1｜結構止跌',[['a','低點 L 後形成反彈'],[
 const SG_TONE={'尚未打底':'bad','初步止跌':'warn','打底待確認':'info','可評估進場':'good','失效／疑似假突破':'bad','資料不足':'na'};
 function sgBadge(s){ const t=SG_TONE[s]; return `<span class="st ${t==='info'?'':t}" style="${t==='info'?'background:var(--accent-soft);color:var(--accent)':''}">${s}</span>`; }
 function viewSignal(){
-  const cfg=sgCfg();
-  let h=topbar('Watchlist signal analysis','追蹤個股訊號分析',`<button class="btn" data-act="updWatch">↻ 更新追蹤個股</button>`);
-  h+=`<p style="margin:-8px 0 14px;color:var(--muted);font-size:14px;max-width:80ch">依「止跌反轉進場四道閘門」逐一檢查追蹤中個股。技術三閘門是<b>進場資格</b>，不是買進指令；必須先定義停損、報酬風險比至少 2 : 1 才能評估進場。RSI、KD 只作輔助觀察。</p>`;
-  h+=`<div class="bar"><div class="field"><label for="cfgCap">總資金（元）</label><input id="cfgCap" type="number" min="10000" step="10000" data-chg="cfg" data-k="capital" value="${cfg.capital}"></div>
+  const id=S.sigId; const cfg=sgCfg(id); const custom=!!S.me.sigBy?.[id];
+  let h=`<div style="margin-bottom:6px"><button class="btn sm ghost" data-act="nav" data-v="watch">← 追蹤中個股</button></div>`;
+  h+=topbar('Signal analysis', esc(nameOf(id))+' <span class="num" style="font-size:20px;color:var(--muted)">'+id+'</span>　訊號分析',`<button class="btn" data-act="updSig">↻ 更新此公司</button>`);
+  const E=id&&co(id)?signalEval(id):null;
+  if(!E) return h+`<div class="empty"><b>尚無 ${esc(nameOf(id))} 的行情資料</b>按「更新此公司」取得資料後即可分析。</div>`;
+  const P=E.i>0?signalEval(id,E.i-1):null;
+  h+=`<p style="margin:-8px 0 14px;color:var(--muted);font-size:14px;max-width:80ch">依「止跌反轉進場四道閘門」檢查此個股。技術三閘門是<b>進場資格</b>，不是買進指令；必須先定義停損、報酬風險比至少 2 : 1 才能評估進場。RSI、KD 只作輔助觀察。</p>`;
+  h+=`<div class="bar"><div class="field"><label for="cfgCap">此筆交易的總資金（元）</label><input id="cfgCap" type="number" min="10000" step="10000" data-chg="cfg" data-k="capital" value="${cfg.capital}"></div>
     <div class="field"><label for="cfgRisk">單筆風險（%）</label><select id="cfgRisk" data-chg="cfg" data-k="risk">${[0.5,0.75,1].map(v=>`<option value="${v}" ${cfg.risk==v?'selected':''}>${v}%</option>`).join('')}</select></div>
     <div class="field"><label for="cfgBuf">停損設在 L2 下方（%）</label><select id="cfgBuf" data-chg="cfg" data-k="buf">${[0.5,1,2,3].map(v=>`<option value="${v}" ${cfg.buf==v?'selected':''}>${v}%</option>`).join('')}</select></div>
-    <span style="font-size:13px;color:var(--muted)">單筆最大損失 <b class="num" style="color:var(--ink)">${nf(cfg.capital*cfg.risk/100,0)}</b> 元</span></div>`;
-  if(!S.me.watch.length) return h+`<div class="empty">☆<b>尚未追蹤任何個股</b>在「財報健檢」按「加入追蹤」，這裡就會出現四道閘門的檢查結果。<div style="margin-top:12px"><button class="btn pri" data-act="nav" data-v="health">前往財報健檢</button></div></div>`;
-  const rows=S.me.watch.map(id=>{ const E=signalEval(id); const P=E&&E.i>0?signalEval(id,E.i-1):null; return {id,E,P}; }).filter(r=>r.E);
-  const order={'可評估進場':0,'打底待確認':1,'初步止跌':2,'失效／疑似假突破':3,'尚未打底':4,'資料不足':5};
-  rows.sort((a,b)=>order[a.E.status]-order[b.E.status]);
-  const env=rows[0]?.E.env; const T=taiex(); 
-  if(env&&!env.ok) h+=`<div class="banner warn"><b>大盤或族群處於急跌環境</b>　${esc(env.text)}。依紀律，所有個股的閘門 4 皆暫不通過。</div>`;
-  const cnt=k=>rows.filter(r=>r.E.status===k).length;
-  h+=`<div class="kpis">${['可評估進場','打底待確認','初步止跌','尚未打底'].map(k=>`<div class="kpi"><small>${k}</small><b>${cnt(k)}</b><span>${k==='尚未打底'?'另有失效 '+cnt('失效／疑似假突破')+' 檔':'檔'}</span></div>`).join('')}</div>`;
-  h+=`<div class="tbl-wrap" style="margin-bottom:14px"><table><thead><tr><th>公司</th><th>狀態</th><th>前一交易日</th><th>閘門 1</th><th>閘門 2</th><th>閘門 3</th><th>閘門 4</th><th>收盤</th><th>H</th><th>停損</th><th>報酬風險比</th></tr></thead><tbody>
-    ${rows.map(({id,E,P})=>`<tr><td><a href="#sg-${id}" data-act="sgJump" data-id="${id}" style="color:inherit"><span class="num">${id}</span> ${esc(nameOf(id))}</a></td><td style="text-align:left">${sgBadge(E.status)}</td><td style="text-align:left;opacity:.75">${P?sgBadge(P.status):'—'}</td>
-      ${[1,2,3,4].map(g=>`<td>${E.gates[g]?(E.gates[g].pass?'<span class="st good">通過</span>':'<span class="st na">'+Object.values(E.gates[g].items).filter(x=>x.s==='ok').length+'/'+Object.keys(E.gates[g].items).length+'</span>'):'—'}</td>`).join('')}
-      <td class="num">${nf(adjPx(co(id).px)[E.i][4])}</td><td class="num">${E.H!=null?nf(E.H):'—'}</td><td class="num">${E.stop!=null?nf(E.stop):'—'}</td><td class="num">${E.rr!=null?E.rr.toFixed(2)+' : 1':'—'}</td></tr>`).join('')}</tbody></table></div>`;
-  h+=`<div class="bt-list">${rows.map(sgCard).join('')}</div>`;
+    <div style="font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:2px"><span>${esc(nameOf(id))} 單筆最大損失 <b class="num" style="color:var(--ink);font-size:16px">${nf(cfg.capital*cfg.risk/100,0)}</b> 元</span>
+    <span>${custom?'此個股使用自訂設定　<button class="btn sm ghost" data-act="cfgReset">恢復預設</button>':'使用預設值（100 萬、1%、1%），修改後只套用於此個股'}</span></div></div>`;
+  if(E.env&&!E.env.ok) h+=`<div class="banner warn"><b>大盤或族群處於急跌環境</b>　${esc(E.env.text)}。依紀律，閘門 4 暫不通過。</div>`;
+  h+=`<div class="bt-list">${sgCard({id,E,P})}</div>`;
   h+=`<div class="foot-notes"><div class="panel"><p><b>部位公式</b>　可承受損失 ＝ 總資金 × 單筆風險比例；部位上限 ＝ 可承受損失 ÷ 停損百分比。例：100 萬 × 1% ÷ 8% ≈ 12.5 萬元。</p></div>
     <div class="panel"><p><b>分批執行</b>　首次 50%：收盤突破 H 且量符合閘門 2。加碼 50%：之後 1–5 日回測 H 附近、收盤守住再加碼。離突破區過遠不追價。</p></div>
     <div class="panel"><p><b>適用範圍</b>　適合 5–30 個交易日的波段判斷，不適合長期投資或低流動性標的。規則未經回測驗證，不保證反轉成功，也不構成投資建議。</p></div></div>`;
@@ -1180,7 +1185,8 @@ const A={
   updAll:()=>runUpdate(scopeIds(),'更新全部公司'), updOne:()=>runUpdate([S.sel],'更新 '+nameOf(S.sel)), updMarket:()=>updateMarket(),
   open:d=>{S.sel=d.id; S.scope='all'; A.nav({v:'health'});}, goTech:d=>{S.tech.id=d.id; A.nav({v:'tech'});},
   days:d=>{S.tech.days=+d.v; render();},
-  sgJump:d=>{ document.getElementById('sg-'+d.id)?.scrollIntoView({behavior:'smooth',block:'start'}); },
+  sgOpen:d=>{ S.sigId=d.id; A.nav({v:'signal'}); },
+  updSig:()=>runUpdate([S.sigId],'更新 '+nameOf(S.sigId)),
   updWatch:()=>runUpdate(S.me.watch.filter(id=>S.me.companies.includes(id)),'更新追蹤個股'),
   btJump:d=>{ document.getElementById('bt-'+d.id)?.scrollIntoView({behavior:'smooth',block:'start'}); },
   etfFav:d=>{const f=S.me.etfFav,i=f.indexOf(d.id); i<0?f.push(d.id):f.splice(i,1); persist(); render();},
@@ -1199,7 +1205,8 @@ const CHG={
   peer:(v,d)=>{ const i=+d.i; if(i===0){S.sel=v; S.peer=[];} else S.peer[i]=v||null; render(); },
   et:v=>{S.etf.type=v; render();}, em:v=>{S.etf.mkt=v; render();}, es:v=>{S.etf.sort=v; render();}, bd:v=>{S.brief.date=v.slice(0,10); render();},
   cmp:(v,d,el)=>{ const c=S.etf.cmp; const i=c.indexOf(d.id); if(el.checked&&i<0){ if(c.length>=3){el.checked=false; toast('最多比較 3 檔'); return;} c.push(d.id);} else if(!el.checked&&i>=0) c.splice(i,1); render(); },
-  cfg:(v,d)=>{ const n=+v; if(!(n>0)) return; S.me.sig={...sgCfg(),[d.k]:n}; persist(); render(); },
+  cfg:(v,d)=>{ const n=+v; if(!(n>0)) return; const id=S.sigId; S.me.sigBy={...(S.me.sigBy||{}),[id]:{...sgCfg(id),[d.k]:n}}; persist(); render(); },
+  cfgReset:()=>{ const b={...(S.me.sigBy||{})}; delete b[S.sigId]; S.me.sigBy=b; persist(); render(); },
   assign:(v,d)=>{ for(const g in S.me.groups) S.me.groups[g]=S.me.groups[g].filter(x=>x!==d.id); if(v) S.me.groups[v].push(d.id); persist(); render(); }
 };
 const INP={ q:v=>{S.q=v; renderKeep('q');}, eq:v=>{S.etf.q=v; renderKeep('eq');}, aq:v=>{ const el=$('#hits'); if(el) el.innerHTML=coHits(v.trim()); } };
@@ -1208,21 +1215,22 @@ document.addEventListener('change',e=>{ const el=e.target.closest('[data-chg]');
 document.addEventListener('input',e=>{ if(e.isComposing) return; const el=e.target.closest('[data-inp]'); if(!el) return; INP[el.dataset.inp]?.(el.value); });
 document.addEventListener('compositionstart',e=>{ if(e.target.id==='aq'){ const el=$('#hits'); if(el) el.innerHTML=`<div class="it" style="color:var(--muted)">選好中文字後就會開始搜尋…</div>`; } });
 document.addEventListener('compositionend',e=>{ const el=e.target.closest?.('[data-inp]'); if(!el) return; setTimeout(()=>INP[el.dataset.inp]?.(el.value),0); });
-document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); if(e.key==='Enter'&&e.target.classList?.contains('wc')) A.sgOpen(e.target.dataset); });
 function renderKeep(id){ const el=document.getElementById(id), pos=el?.selectionStart; render(); const n=document.getElementById(id); if(n){ n.focus(); try{n.setSelectionRange(pos,pos)}catch(e){} } }
 
-function hashToken(){ return S.view + (S.view==='health'?'-'+S.sel : S.view==='tech'?'-'+S.tech.id : ''); }
+function hashToken(){ return S.view + (S.view==='health'?'-'+S.sel : S.view==='tech'?'-'+S.tech.id : S.view==='signal'&&S.sigId?'-'+S.sigId : ''); }
 function syncHash(push){ const t='#'+hashToken(); if(location.hash===t) return; try{ history[push?'pushState':'replaceState'](null,'',t); }catch(e){ try{ location.hash=t; }catch(_){} } }
 function readHash(){
   const h=(location.hash||'').slice(1); if(!h) return false;
-  const [v,id]=h.split('-'); if(!NAV.some(n=>n[0]===v)) return false;
-  S.view=v; if(id){ if(v==='health'&&S.me.companies.includes(id)){S.sel=id; S.scope='all';} if(v==='tech') S.tech.id=id; }
+  const [v,id]=h.split('-'); if(!NAV.some(n=>n[0]===v)&&v!=='signal') return false;
+  S.view=v; if(id){ if(v==='health'&&S.me.companies.includes(id)){S.sel=id; S.scope='all';} if(v==='tech') S.tech.id=id; if(v==='signal') S.sigId=id; }
+  if(v==='signal'&&!S.sigId) S.view='watch';
   return true;
 }
 window.addEventListener('hashchange',()=>{ if(readHash()){ closeModal(); render(); } });
 window.addEventListener('popstate',()=>{ if(readHash()){ closeModal(); render(); } });
 function render(push){
-  $('#nav').innerHTML=NAV.filter(([v])=>v!=='admin'||S.canEdit).map(([v,ic,t])=>`<button data-act="nav" data-v="${v}" ${S.view===v?'aria-current="page"':''}><span class="ic">${ic}</span>${t}${v==='etf'?'<span class="tag">V09</span>':''}</button>`).join('');
+  $('#nav').innerHTML=NAV.filter(([v])=>v!=='admin'||S.canEdit).map(([v,ic,t])=>`<button data-act="nav" data-v="${v}" ${S.view===v||(v==='watch'&&S.view==='signal')?'aria-current="page"':''}><span class="ic">${ic}</span>${t}${v==='etf'?'<span class="tag">V09</span>':''}</button>`).join('');
   const V={health:viewHealth,watch:viewWatch,signal:viewSignal,peer:viewPeer,tech:viewTech,etf:viewEtf,brief:viewBrief,admin:viewAdmin}[S.view]||viewHealth;
   let pre='';
   if(S.mode==='db'&&!canWrite()) pre=`<div class="banner warn">你的帳號正在等待管理者核准。核准前可以瀏覽內建資料，但加入公司、追蹤與快照不會保存。</div>`;
@@ -1252,7 +1260,7 @@ render();
       const me=await user.me(); $('#who').textContent=(me.name||'已登入')+(S.isOwner?'（擁有者）':''); $('#whoNote').textContent='清單跟著帳號同步';
       try{
         const snap=await db.doc('members/'+uid).get();
-        if(snap.exists){ const d=snap.data(); S.joinedAt=d.joinedAt; S.me={companies:d.companies||[],groups:d.groups||{},watch:d.watch||[],etfFav:d.etfFav||[],sig:d.sig||null}; }
+        if(snap.exists){ const d=snap.data(); S.joinedAt=d.joinedAt; S.me={companies:d.companies||[],groups:d.groups||{},watch:d.watch||[],etfFav:d.etfFav||[],sig:d.sig||null,sigBy:d.sigBy||{}}; }
         else { S.joinedAt=Date.now(); await db.doc('members/'+uid).set({...S.me, joinedAt:S.joinedAt, updatedAt:Date.now()}).catch(()=>{}); }
       }catch(e){}
       if(!S.me.companies.includes(S.sel)) S.sel=S.me.companies[0];
