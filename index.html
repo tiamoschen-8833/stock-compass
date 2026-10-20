@@ -174,6 +174,18 @@ td.best{color:var(--good);font-weight:700}
 .progress{height:4px;background:var(--sunk);border-radius:2px;overflow:hidden;margin-top:8px}
 .progress i{display:block;height:100%;background:var(--accent);transition:width .3s}
 .mbar-top{display:none}
+.bt-list{display:grid;gap:12px}
+.bt-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.4fr);gap:16px;margin-top:10px}
+.bt-rule{margin-bottom:8px}
+.bt-rt{font-size:12.5px;color:var(--accent);font-weight:500;margin-bottom:2px}
+.bt-it{display:flex;gap:8px;align-items:flex-start;padding:4px 0;border-bottom:1px dashed var(--line)}
+.bt-it .st{flex:none;margin-top:2px;min-width:62px;text-align:center}
+.bt-it b{font-size:13.5px;font-weight:500;display:block}
+.bt-it small{font-size:12px;color:var(--muted);display:block}
+.bt-foot{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:13px}
+.bt-foot b{display:block;font-size:13px;margin-bottom:2px}
+.bt-foot div div{color:var(--muted)}
+@media (max-width:900px){.bt-grid,.bt-foot{grid-template-columns:1fr}}
 .detail{margin-top:14px}
 @media (max-width:900px){
   .app{grid-template-columns:1fr}
@@ -562,11 +574,12 @@ function viewPeer(){
 function viewTech(){
   const ids=S.me.companies.filter(i=>co(i)); const etfs=Object.keys(etfData());
   if(!ids.includes(S.tech.id)&&!etfs.includes(S.tech.id)) S.tech.id=ids[0];
-  const isEtf=!co(S.tech.id); const px=(isEtf?etfData()[S.tech.id]?.px:co(S.tech.id)?.px)||[];
+  const isEtf=!co(S.tech.id); const px=adjPx((isEtf?etfData()[S.tech.id]?.px:co(S.tech.id)?.px)||[]);
   let h=topbar('Price & volume','技術分析');
   h+=`<p style="margin:-8px 0 14px;color:var(--muted);font-size:14px">財報回答企業價值，技術圖觀察市場價格、趨勢與交易節奏。兩者應搭配使用，不應只憑單一指標決策。</p>`;
   h+=`<div class="bar"><div class="field"><label for="tid">分析標的</label><select id="tid" data-chg="tech"><optgroup label="我的公司">${companyOptions(ids,S.tech.id)}</optgroup><optgroup label="ETF">${companyOptions(etfs,S.tech.id)}</optgroup></select></div>
     <div class="field"><label>期間</label><div class="chips">${[20,60,120].map(d=>`<button class="chip" aria-pressed="${S.tech.days===d}" data-act="days" data-v="${d}">近 ${d} 日</button>`).join('')}</div></div></div>`;
+  if(px.adjusted?.length) h+=`<div class="banner info">${px.adjusted.join('、')} 出現超過漲跌幅限制的價格跳動（股票分割、減資或除權），之前的股價與成交量已依比例還原，方便比較。</div>`;
   if(px.length<21) return h+`<div class="empty"><b>行情資料不足</b>請按「更新」取得最新日成交資料。</div>`;
   const cl=px.map(x=>x[4]), n=cl.length-1, last=px[n], prev=px[n-1];
   const ma5=MA(cl,5,n), ma20=MA(cl,20,n), ma60=MA(cl,60,n), rsi=RSI(cl.slice(-120));
@@ -694,12 +707,155 @@ function viewBrief(){
   const top=uni.map(u=>{const k=u.px.findIndex(x=>x[0]===S.brief.date); if(k<1) return null; return {id:u.id,v:u.val(u.px[k]),c:u.px[k][4],d:u.px[k][4]-u.px[k-1][4]};}).filter(Boolean).sort((a,b)=>b.v-a.v).slice(0,5);
   h+=`<section class="sec"><div class="sec-h"><span class="n">01</span><h3>成交值前五名</h3><p>系統收錄的公司與 ETF 中，依當日成交值排序</p></div><div class="tbl-wrap"><table><thead><tr><th>標的</th><th>收盤</th><th>漲跌</th><th>成交值（億）</th></tr></thead><tbody>${top.map((r,k)=>`<tr><td><span class="num" style="color:var(--accent)">${String(k+1).padStart(2,'0')}</span>　<span class="num">${r.id}</span> ${esc(nameOf(r.id))}</td><td class="num">${nf(r.c)}</td><td class="num ${cls(r.d)}">${r.d>0?'+':''}${nf(r.d)}</td><td class="num">${nf(r.v,1)}</td></tr>`).join('')}</tbody></table></div></section>`;
   const snap=S.briefs[S.brief.date];
-  const rows = snap ? snap.rows : S.me.watch.map(id=>{const M=analyze(id); const c=co(id); const k=c?.px.findIndex(x=>x[0]===S.brief.date); if(!M||k<1) return null; return {id, close:c.px[k][4], chg:c.px[k][4]/c.px[k-1][4]-1, pe:M.pe, score:M.score};}).filter(Boolean);
+  const rows = snap ? snap.rows : S.me.watch.map(id=>{const M=analyze(id); const c=co(id); const k=c?.px.findIndex(x=>x[0]===S.brief.date); if(!M||k<1) return null; return {id, close:c.px[k][4], chg:c.px[k][4]/c.px[k-1][4]-1, pe:M.pe, score:M.score, bottom:bottomEval(c.px,k).status};}).filter(Boolean);
   h+=`<section class="sec"><div class="sec-h"><span class="n">02</span><h3>我的追蹤清單與估值觀察</h3><p>${snap?'此日已保存快照，顯示當時的資料與判斷':'依目前追蹤清單即時計算'}</p></div>
-   ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>公司</th><th>收盤</th><th>漲跌幅</th><th>本益比</th><th>健康分</th><th>估值觀察</th></tr></thead><tbody>${rows.map(r=>`<tr><td><span class="num">${r.id}</span> ${esc(nameOf(r.id))}</td><td class="num">${nf(r.close)}</td><td class="num ${cls(r.chg)}">${pct(r.chg,true,2)}</td><td class="num">${nf(r.pe,1)}×</td><td class="num">${r.score}</td><td style="text-align:left">${r.pe==null?'—':r.pe<=0?'虧損，本益比不適用':r.pe<15?'本益比偏低，需確認成長是否放緩':r.pe<=25?'位於一般合理區間':'本益比偏高，需高成長支撐'}</td></tr>`).join('')}</tbody></table></div>`
+   ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>公司</th><th>收盤</th><th>漲跌幅</th><th>本益比</th><th>健康分</th><th>打底狀態</th><th>估值觀察</th></tr></thead><tbody>${rows.map(r=>`<tr><td><span class="num">${r.id}</span> ${esc(nameOf(r.id))}</td><td class="num">${nf(r.close)}</td><td class="num ${cls(r.chg)}">${pct(r.chg,true,2)}</td><td class="num">${nf(r.pe,1)}×</td><td class="num">${r.score}</td><td style="text-align:left">${r.bottom?btBadge(r.bottom):'—'}</td><td style="text-align:left">${r.pe==null?'—':r.pe<=0?'虧損，本益比不適用':r.pe<15?'本益比偏低，需確認成長是否放緩':r.pe<=25?'位於一般合理區間':'本益比偏高，需高成長支撐'}</td></tr>`).join('')}</tbody></table></div>`
    :`<div class="empty"><b>尚無追蹤個股</b>在「財報健檢」按「加入追蹤」後，早報會自動列出估值觀察。</div>`}</section>`;
+  h+=bottomSection(S.brief.date);
   h+=`<div class="foot-notes"><div class="panel"><p><b>資料說明</b>　加權指數與成交值取自 FinMind 整理之證交所盤後資料（TAIEX）。全市場漲跌家數需付費資料，本頁未提供。</p></div><div class="panel"><p><b>使用提醒</b>　這是資訊整理與學習工具，不構成買賣建議。投資判讀仍應搭配公司財報、產業循環、估值及風險承受度。</p></div></div>`;
   return h;
+}
+
+/* ---------- 除權／分割還原：台股單日漲跌幅上限 10%，超過 11% 視為股本變動並向前還原 ---------- */
+const ADJ=new WeakMap();
+function adjPx(px){
+  if(!px||px.length<2) return px; if(ADJ.has(px)) return ADJ.get(px);
+  const out=px.map(x=>x.slice()); let f=1; const evs=[];
+  for(let t=out.length-1;t>0;t--){ const r=px[t][1]/px[t-1][4]; if(Math.abs(px[t][4]/px[t-1][4]-1)>.11 && (r<.89||r>1.12)){ f*=r; evs.push(px[t][0]); }
+    if(f!==1){ const x=out[t-1]; x[1]=px[t-1][1]*f; x[2]=px[t-1][2]*f; x[3]=px[t-1][3]*f; x[4]=px[t-1][4]*f; x[5]=px[t-1][5]/f; } }
+  out.adjusted=evs; ADJ.set(px,out); return out;
+}
+/* ---------- 技術面打底判讀 ---------- */
+const BT={win:60, minDays:45, retestDays:5, rebound:.05, retrace:.5, surge:.04, volShrink:.8, volBreak:1.5, boTol:.03};
+const ST3={ok:'符合', no:'尚未符合', na:'資料不足'};
+function bottomEval(px,i){
+  px=adjPx(px);
+  const R={items:{},notes:[],status:'尚未打底',falseBO:false,L:null,R:null};
+  const it=(k,s,d)=>{R.items[k]={s,d};};
+  if(i==null||i<BT.minDays){ for(const k of ['1a','1b','1c','2a','2b','2c','3a','3b','3c']) it(k,'na','可用交易日不足 '+BT.minDays+' 日'); R.status='資料不足'; return R; }
+  const H=x=>px[x][2], Lo=x=>px[x][3], C=x=>px[x][4], V=x=>px[x][5];
+  const cl=px.slice(0,i+1).map(x=>x[4]); const ma=(n,x)=>MA(cl,n,x);
+  // 以近 60 日最高點為下跌起點，之後的最低點為「前低」
+  const s=Math.max(0,i-BT.win+1);
+  let iP=s; for(let t=s;t<=i;t++) if(H(t)>=H(iP)) iP=t;
+  let iL=iP; for(let t=iP;t<=i;t++) if(Lo(t)<=Lo(iL)) iL=t;
+  const L=Lo(iL); R.L=L; R.iL=iL; R.P=H(iP);
+  const dd=1-L/H(iP); R.dd=dd;
+  if(iP>=i-1) R.notes.push('股價位於近 60 日高點附近，並非下跌後的打底型態。');
+  else if(dd<.1) R.notes.push(`自 ${px[iP][0]} 高點 ${nf(H(iP))} 起的回檔僅 ${(dd*100).toFixed(1)}%，並非明顯下跌段，打底判讀參考性較低。`);
+  else R.notes.push(`下跌段：${px[iP][0]} 高點 ${nf(H(iP))} → ${px[iL][0]} 低點 ${nf(L)}（跌幅 ${(dd*100).toFixed(1)}%）。`);
+  // 1a 不再創新低
+  const since=i-iL;
+  it('1a', since>=BT.retestDays?'ok':'no', since===0?`今日創 ${BT.win} 日新低 ${nf(L)}`:since<BT.retestDays?`${since} 個交易日前才創新低 ${nf(L)}，止跌時間太短`:`${px[iL][0]} 低點 ${nf(L)} 後已 ${since} 個交易日未再破底`);
+  // 1b 回測前低未破：反彈 ≥5% 後，回檔吃掉反彈一半以上且守住前低
+  let k=null,Rh=null,j=null; let run=iL;
+  for(let t=iL+1;t<=i;t++){ if(H(t)>H(run)) run=t; const rh=H(run);
+    if(rh>=L*(1+BT.rebound) && t-run>=2 && Lo(t)<=L+BT.retrace*(rh-L)){ k=run; Rh=rh; j=t; break; } }
+  let jLow=null;
+  if(j!=null){ let b=null; for(let t=j+1;t<=i;t++){ if(C(t)>Rh){b=t;break;} } const end=b??i+1; jLow=j; for(let t=j;t<end;t++) if(Lo(t)<Lo(jLow)) jLow=t; R.b=b; }
+  R.R=Rh; R.k=k; R.j=j;
+  if(j!=null) it('1b','ok',`反彈至 ${nf(Rh)} 後回測 ${nf(Lo(jLow))}（${px[jLow][0]}），守住前低 ${nf(L)}`);
+  else if(since<BT.retestDays) it('1b','no','仍在創低階段，尚無回測');
+  else { let mx=iL; for(let t=iL;t<=i;t++) if(H(t)>H(mx)) mx=t; it('1b','no', H(mx)<L*(1+BT.rebound)?`低點後最大反彈僅 ${pct(H(mx)/L-1)}，尚未形成可回測的反彈`:`反彈至 ${nf(H(mx))} 後尚未出現回測前低的走勢`); }
+  // 1c 單日大漲不算打底
+  const chg=C(i)/C(i-1)-1, below=C(i-1)<ma(20,i-1);
+  it('1c', chg>=BT.surge&&below?'no':'ok', chg>=BT.surge&&below?`今日大漲 ${pct(chg)}，前一日仍在月線下，單日急漲不視為打底完成`:`今日 ${pct(chg)}，非單日急漲轉折`);
+  // 2a 下跌量縮
+  const seg=iL-iP;
+  if(seg<9) it('2a','na',`下跌段僅 ${seg} 日，無法比較量能`);
+  else { const n=Math.floor(seg/3); const avg=(a,b)=>{let x=0;for(let t=a;t<b;t++)x+=V(t);return x/(b-a);}; const v1=avg(iP,iP+n), v3=avg(iL-n+1,iL+1);
+    it('2a', v3<v1*BT.volShrink?'ok':'no', `下跌段末段均量為前段的 ${(v3/v1*100).toFixed(0)}%${v3<v1*BT.volShrink?'，賣壓趨緩':'，量能未明顯萎縮'}`); }
+  // 3b 突破前一波反彈高點 & 假突破
+  const b=R.b;
+  if(j==null) it('3b','no','尚未形成「反彈高點 → 回測」結構，無可突破的頸線');
+  else if(b==null) it('3b','no',`頸線（前波反彈高點）${nf(Rh)}，收盤 ${nf(C(i))} 尚未突破（差 ${pct(Rh/C(i)-1,false)}）`);
+  else { let fell=null; for(let t=b+1;t<=Math.min(i,b+10);t++) if(C(t)<Rh*(1-BT.boTol)){fell=t;break;}
+    if(fell!=null){ R.falseBO=true; it('3b','no',`${px[b][0]} 曾收盤突破 ${nf(Rh)}，但 ${px[fell][0]} 跌回頸線下，疑似假突破`); }
+    else it('3b','ok',`${px[b][0]} 收盤 ${nf(C(b))} 突破前波反彈高點 ${nf(Rh)}`); }
+  // 2b 突破放量
+  if(b==null) it('2b', j==null?'no':'no', '尚未出現突破，無法確認放量');
+  else { const a=Math.max(0,b-20); let x=0; for(let t=a;t<b;t++) x+=V(t); const r=V(b)/(x/(b-a));
+    it('2b', r>=BT.volBreak?'ok':'no', `突破當日量為前 20 日均量的 ${r.toFixed(1)} 倍${r>=BT.volBreak?'':'，量能不足'}`); }
+  // 2c 量價須配合結構
+  const volSig=R.items['2a'].s==='ok'||R.items['2b'].s==='ok';
+  if(!volSig) it('2c','no','尚無可解讀的量價訊號');
+  else if(R.items['1a'].s!=='ok') it('2c','no','量能訊號出現，但價格仍在創低，不能單獨視為確認');
+  else if(R.falseBO) it('2c','no','突破後跌回，量價訊號失效');
+  else it('2c','ok','量能變化與止跌、突破結構方向一致');
+  // 3a 站上 5/10/20 日均線（連續兩日）
+  const above=x=>C(x)>ma(5,x)&&C(x)>ma(10,x)&&C(x)>ma(20,x);
+  const a0=above(i), a1=above(i-1);
+  it('3a', a0&&a1?'ok':'no', a0&&a1?`連續兩日站上 MA5 ${nf(ma(5,i))}、MA10 ${nf(ma(10,i))}、MA20 ${nf(ma(20,i))}`
+    : a0?'僅今日站上三條均線，需再一日確認' : `收盤 ${nf(C(i))}，${['5','10','20'].filter(n=>C(i)<=ma(+n,i)).map(n=>'MA'+n).join('、')} 尚未站上`);
+  if(!a0&&a1) R.notes.push('昨日站上均線、今日跌回，留意假突破。');
+  // 3c 突破後回測不破
+  if(b==null||R.falseBO) it('3c','no', R.falseBO?'突破後跌回頸線下，回測失敗':'尚未突破，無回測可確認');
+  else { let tested=null; for(let t=b+1;t<=i;t++) if(Lo(t)<=Rh*(1+BT.boTol)){tested=t;}
+    it('3c', tested!=null?'ok':'no', tested!=null?`突破後 ${px[tested][0]} 回測至 ${nf(Lo(tested))}，收盤守住頸線 ${nf(Rh)}`:`突破後 ${i-b} 日尚未回測頸線 ${nf(Rh)}，仍需觀察`); }
+  if(R.falseBO) R.notes.push('出現疑似假突破：突破頸線後收盤跌回 3% 以上。');
+  // 整體狀態
+  const ok=k=>R.items[k].s==='ok';
+  if(!ok('1a')) R.status='尚未打底';
+  else if(!(ok('1b')&&ok('3a')&&ok('1c'))) R.status='初步止跌';
+  else if(ok('3b')&&ok('3c')&&ok('2b')&&!R.falseBO) R.status='打底訊號較完整';
+  else R.status='打底待確認';
+  const rsi=RSI(cl.slice(-120)); R.rsi=rsi;
+  return R;
+}
+const BT_RULES=[['規則 1　止跌與回測',[['1a','不再持續創新低'],['1b','回測前低未跌破'],['1c','非單日大漲造成']]],
+  ['規則 2　成交量與量價配合',[['2a','下跌過程量能萎縮'],['2b','突破時明顯放量'],['2c','量價與價格結構一致']]],
+  ['規則 3　均線與價格結構',[['3a','站上 5／10／20 日均線'],['3b','突破前一波反彈高點'],['3c','突破後回測支撐不破']]]];
+const BT_LABEL=Object.fromEntries(BT_RULES.flatMap(r=>r[1]));
+const BT_TONE={'尚未打底':'bad','初步止跌':'warn','打底待確認':'info','打底訊號較完整':'good','資料不足':'na'};
+function bottomSpark(px,i,E){
+  px=adjPx(px);
+  const s=Math.max(0,i-79), seg=px.slice(s,i+1), W=360,H=110,P=4;
+  const hi=Math.max(...seg.map(x=>x[2])), lo=Math.min(...seg.map(x=>x[3])), r=hi-lo||1, X=t=>P+(t/(seg.length-1))*(W-2*P), Y=v=>P+(hi-v)/r*(H-2*P);
+  let g=`<svg class="chart" viewBox="0 0 ${W} ${H}" style="height:${H}px" role="img" aria-label="近 80 日收盤與關鍵價位">`;
+  if(E.L!=null) g+=`<line x1="${P}" x2="${W-P}" y1="${Y(E.L)}" y2="${Y(E.L)}" stroke="var(--down)" stroke-dasharray="4 3"/><text x="${W-P}" y="${Y(E.L)-3}" text-anchor="end">前低 ${nf(E.L)}</text>`;
+  if(E.R!=null&&E.R<=hi) g+=`<line x1="${P}" x2="${W-P}" y1="${Y(E.R)}" y2="${Y(E.R)}" stroke="var(--accent)" stroke-dasharray="4 3"/><text x="${W-P}" y="${Y(E.R)-3}" text-anchor="end">頸線 ${nf(E.R)}</text>`;
+  g+=`<polyline points="${seg.map((x,t)=>X(t)+','+Y(x[4])).join(' ')}" fill="none" stroke="var(--ink)" stroke-width="1.6"/>`;
+  return g+`<circle cx="${X(seg.length-1)}" cy="${Y(seg.at(-1)[4])}" r="3" fill="var(--ink)"/></svg>`;
+}
+function bottomSection(date){
+  let h=`<section class="sec"><div class="sec-h"><span class="n">03</span><h3>技術面打底警示</h3><p>追蹤中的公司，依三項規則逐條檢查（${date}）</p></div>`;
+  if(!S.me.watch.length) return h+`<div class="empty"><b>尚無追蹤個股</b>在「財報健檢」按「加入追蹤」後，這裡會每天檢查打底訊號。</div></section>`;
+  const cards=S.me.watch.map(id=>{ const c=co(id); const px=c?.px||[]; const i=px.findIndex(x=>x[0]===date);
+    const E=bottomEval(px,i<0?null:i), P=i>0?bottomEval(px,i-1):null;
+    return {id,c,px,i,E,P};});
+  const order={'打底訊號較完整':0,'打底待確認':1,'初步止跌':2,'尚未打底':3,'資料不足':4};
+  cards.sort((a,b)=>order[a.E.status]-order[b.E.status]);
+  h+=`<div class="tbl-wrap" style="margin-bottom:12px"><table><thead><tr><th>公司</th><th>整體狀態</th><th>前一交易日</th><th>規則 1</th><th>規則 2</th><th>規則 3</th></tr></thead><tbody>${cards.map(({id,E,P})=>{const cnt=g=>BT_RULES[g][1].filter(([k])=>E.items[k].s==='ok').length+'/3';
+    return `<tr><td><a href="#bt-${id}" data-act="btJump" data-id="${id}" style="color:inherit"><span class="num">${id}</span> ${esc(nameOf(id))}</a></td><td style="text-align:left">${btBadge(E.status)}${E.falseBO?' <span class="st bad">疑似假突破</span>':''}</td><td style="text-align:left">${P?btBadge(P.status,true):'—'}</td><td class="num">${cnt(0)}</td><td class="num">${cnt(1)}</td><td class="num">${cnt(2)}</td></tr>`}).join('')}</tbody></table></div>`;
+  h+=`<div class="bt-list">${cards.map(btCard).join('')}</div>`;
+  h+=`<details class="panel" style="margin-top:12px"><summary style="cursor:pointer;font-weight:500">判斷門檻說明</summary><div style="font-size:13px;color:var(--muted);margin-top:8px;display:grid;gap:4px">
+    <div>• 前低：近 ${BT.win} 個交易日最低價；距今 ≥ ${BT.retestDays} 個交易日未再破底，視為「不再創新低」。</div>
+    <div>• 回測：自前低反彈 ≥ ${BT.rebound*100}% 後，回檔吃掉反彈幅度一半以上，且未跌破前低。</div>
+    <div>• 單日大漲：當日漲幅 ≥ ${BT.surge*100}% 且前一日仍在 20 日均線下，不列為打底完成依據。</div>
+    <div>• 量縮：下跌段最後三分之一的均量低於最前三分之一的 ${BT.volShrink*100}%。放量：突破當日量 ≥ 前 20 日均量的 ${BT.volBreak} 倍。</div>
+    <div>• 頸線：回測前的反彈高點；收盤高於頸線視為突破，突破後收盤跌回頸線 ${BT.boTol*100}% 以下視為疑似假突破；突破後低點回到頸線 ${BT.boTol*100}% 內且收盤守住，視為回測成功。</div>
+    <div>• 均線：需連續兩個交易日收盤高於 MA5、MA10、MA20。</div>
+    <div>• 整體狀態：未符合 1-1 為「尚未打底」；符合 1-1 但 1-2、1-3、3-1 未齊為「初步止跌」；以上皆符合為「打底待確認」；再加上 3-2、3-3、2-2 且無假突破為「打底訊號較完整」。</div>
+    <div>• RSI、KD 超賣只代表跌深，不列入任何一項判斷。</div></div></details></section>`;
+  return h;
+}
+function btBadge(s,dim){ const t=BT_TONE[s]; return `<span class="st ${t==='info'?'good':t}" style="${t==='info'?'background:var(--accent-soft);color:var(--accent)':''}${dim?';opacity:.75':''}">${s}</span>`; }
+function btCard({id,c,px,i,E,P}){
+  if(!c||i<0) return `<div class="panel bt" id="bt-${id}"><b>${esc(nameOf(id))} ${id}</b><p class="cap">此日期沒有日成交資料，請按「更新此公司」。</p></div>`;
+  const diffs=[]; if(P){ if(P.status!==E.status) diffs.push(`整體狀態：${P.status} → <b>${E.status}</b>`);
+    for(const k of Object.keys(E.items)) if(P.items[k]&&P.items[k].s!==E.items[k].s) diffs.push(`${BT_LABEL[k]}：${ST3[P.items[k].s]} → <b>${ST3[E.items[k].s]}</b>`);
+    if(E.falseBO&&!P.falseBO) diffs.push('<b>新出現疑似假突破</b>'); }
+  if(adjPx(px).adjusted?.length) E.notes.push(`${adjPx(px).adjusted.join('、')} 有股本變動，之前價格已還原計算。`);
+  const miss=Object.keys(E.items).filter(k=>E.items[k].s!=='ok').map(k=>BT_LABEL[k]+(E.items[k].s==='na'?'（資料不足）':''));
+  const chg=px[i][4]/px[i-1][4]-1;
+  return `<div class="panel bt" id="bt-${id}"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
+    <div><b style="font-size:17px">${esc(nameOf(id))}</b> <span class="num" style="color:var(--muted)">${id}</span>　<span class="num">${nf(px[i][4])}</span> <span class="num ${cls(chg)}">${pct(chg,true,2)}</span></div>
+    <div>${btBadge(E.status)}${E.falseBO?' <span class="st bad">疑似假突破</span>':''}</div></div>
+    <div class="bt-grid"><div>${bottomSpark(px,i,E)}<p class="cap" style="margin:4px 0 0">近 80 日收盤；綠虛線為前低，金虛線為頸線。RSI 14：${nf(E.rsi,1)}（僅供參考，不作為見底依據）</p></div>
+    <div>${BT_RULES.map(([t,ks])=>`<div class="bt-rule"><div class="bt-rt">${t}</div>${ks.map(([k,l])=>{const x=E.items[k]; return `<div class="bt-it"><span class="st ${x.s==='ok'?'good':x.s==='no'?'warn':'na'}">${ST3[x.s]}</span><div><b>${l}</b><small>${x.d}</small></div></div>`}).join('')}</div>`).join('')}</div></div>
+    <div class="bt-foot"><div><b>與前一交易日差異</b>${diffs.length?diffs.map(d=>`<div>• ${d}</div>`).join(''):'<div>• 各項判定與前一交易日相同</div>'}</div>
+    <div><b>仍欠缺的訊號</b>${miss.length?`<div>${miss.join('、')}</div>`:'<div>三項規則皆已符合，仍需持續觀察是否守住頸線</div>'}</div>
+    <div><b>假突破檢查</b><div>${E.falseBO?'⚠ 出現疑似假突破，突破後收盤已跌回頸線下':E.b!=null?'突破後尚未跌回頸線，未見假突破':'尚未突破，暫無假突破問題'}</div>${E.notes.filter(n=>!/假突破：/.test(n)).map(n=>`<div>• ${n}</div>`).join('')}</div></div></div>`;
 }
 
 /* ---------- 視圖：後台 ---------- */
@@ -749,12 +905,13 @@ const A={
   updAll:()=>runUpdate(scopeIds(),'更新全部公司'), updOne:()=>runUpdate([S.sel],'更新 '+nameOf(S.sel)), updMarket:()=>updateMarket(),
   open:d=>{S.sel=d.id; S.scope='all'; A.nav({v:'health'});}, goTech:d=>{S.tech.id=d.id; A.nav({v:'tech'});},
   days:d=>{S.tech.days=+d.v; render();},
+  btJump:d=>{ document.getElementById('bt-'+d.id)?.scrollIntoView({behavior:'smooth',block:'start'}); },
   etfFav:d=>{const f=S.me.etfFav,i=f.indexOf(d.id); i<0?f.push(d.id):f.splice(i,1); persist(); render();},
   etfFavOnly:()=>{S.etf.fav=!S.etf.fav; render();}, etfAll:()=>{S.etf.all=!S.etf.all; render();},
   etfDetail:d=>{S.etf.detail=d.id||null; render(); if(d.id) document.querySelector('.detail')?.scrollIntoView({block:'nearest'});}, cmpClear:()=>{S.etf.cmp=[]; render();},
   newGroup:()=>{ const v=$('#ng').value.trim(); if(!v) return; if(!S.me.groups[v]) S.me.groups[v]=[]; persist(); groupsModal(); },
   delGroup:d=>{ delete S.me.groups[d.v]; if(S.scope===d.v) S.scope='all'; persist(); groupsModal(); render(); },
-  saveBrief:async()=>{ const date=S.brief.date; const rows=S.me.watch.map(id=>{const M=analyze(id),c=co(id),k=c?.px.findIndex(x=>x[0]===date); if(!M||k<1) return null; return {id,close:c.px[k][4],chg:c.px[k][4]/c.px[k-1][4]-1,pe:M.pe,score:M.score};}).filter(Boolean);
+  saveBrief:async()=>{ const date=S.brief.date; const rows=S.me.watch.map(id=>{const M=analyze(id),c=co(id),k=c?.px.findIndex(x=>x[0]===date); if(!M||k<1) return null; return {id,close:c.px[k][4],chg:c.px[k][4]/c.px[k-1][4]-1,pe:M.pe,score:M.score,bottom:bottomEval(c.px,k).status};}).filter(Boolean);
     S.briefs[date]={rows,savedAt:Date.now()};
     if(S.mode==='db'&&canWrite()){ try{ await S.db.doc(`members/${S.uid}/briefs/${date}`).set(S.briefs[date]); toast('已保存 '+date+' 快照'); }catch(e){ toast('快照保存失敗：'+(e.code||'')); } }
     else { try{localStorage.setItem('compass-briefs',JSON.stringify(S.briefs))}catch(e){} toast('已保存在此瀏覽器'); } render(); },
