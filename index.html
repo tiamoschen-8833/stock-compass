@@ -92,6 +92,10 @@ button,input,select{font:inherit;color:inherit}
 .sec-h h3{margin:0;font-size:19px;font-family:var(--f-display);font-weight:600}
 .sec-h p{margin:0;color:var(--muted);font-size:13px}
 .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+.grid.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.grid.g5{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media (max-width:1100px){.grid.g4,.grid.g5{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:520px){.grid.g4,.grid.g5{grid-template-columns:1fr}}
 .m{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 14px;display:flex;flex-direction:column;gap:3px;min-width:0}
 .m .h{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:13.5px;color:var(--muted)}
 .m .val{font-family:var(--f-num);font-size:23px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
@@ -504,7 +508,7 @@ function viewHealth(){
     <button class="btn sm" data-act="updOne">↻ 更新此公司</button>
     <button class="btn sm danger" data-act="delCo" data-id="${S.sel}">刪除公司</button></div></div></div>`;
   const s=M.s;
-  h+=`<section class="sec"><div class="sec-h"><span class="n">01</span><h3>成長與獲利</h3><p>先確認公司是否賺錢、靠什麼賺錢</p></div><div class="grid">
+  h+=`<section class="sec"><div class="sec-h"><span class="n">01</span><h3>成長與獲利</h3><p>先確認公司是否賺錢、靠什麼賺錢</p></div><div class="grid g4">
     ${metric('營收年增率',`<span class="${cls(M.revYoY)}">${pct(M.revYoY)}</span>`,s.revYoY,'銷售規模變化',`今年 ${yi(M.rev)}｜去年 ${yi(M.revP)}`)}
     ${metric('毛利率',pct(M.gm,false),s.gm,'產品競爭力','需與同業及自身歷史比較')}
     ${metric('營業利益率',pct(M.om,false),s.om,'本業賺錢效率',`營業利益 ${yi(M.oi)}`)}
@@ -520,7 +524,7 @@ function viewHealth(){
   </div><div class="panel"><h4>五年營收趨勢</h4><p class="cap">觀察成長是否具延續性（月營收加總，單位：億元）</p>${yearBars(M.years)}</div></div>
   <div class="panel" style="margin-top:14px"><h4>本業判讀</h4><p class="cap">系統把數字翻成商業語言</p>
     ${readings(M).map(([t,b,p])=>`<div class="read"><span class="i ${t}">${t==='good'?'✓':'!'}</span><div><b>${b}</b><p>${p}</p></div></div>`).join('')}</div></section>`;
-  h+=`<section class="sec"><div class="sec-h"><span class="n">02</span><h3>獲利品質與風險</h3><p>賺到的錢有沒有變成現金</p></div><div class="grid">
+  h+=`<section class="sec"><div class="sec-h"><span class="n">02</span><h3>獲利品質與風險</h3><p>賺到的錢有沒有變成現金</p></div><div class="grid g5">
     ${metric('現金獲利比',nf(M.cashRatio,2)+'×',s.cashRatio,'營業現金流 ÷ 淨利',M.cashRatio>=.8?'獲利轉現能力良好':'獲利轉現偏弱，需追查原因')}
     ${metric('自由現金流',yi(M.fcf),s.fcf,'營業現金流 − 資本支出',`營業現金流 ${yi(M.cfo)}｜資本支出 ${yi(M.capex!=null?-M.capex:null)}`)}
     ${metric('應收帳款增幅',pct(M.arG),s.arGap,'與營收增速相比',`較營收增速差 ${M.arGap==null?'—':(M.arGap>0?'+':'')+(M.arGap*100).toFixed(1)} 個百分點`)}
