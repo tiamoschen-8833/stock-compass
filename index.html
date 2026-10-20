@@ -1149,6 +1149,7 @@ function viewAdmin(){
 function modal(html){ $('#layer').innerHTML=`<div class="modal-bg" data-act="closeBg"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`; const f=$('#layer input'); f&&f.focus(); }
 function closeModal(){ $('#layer').innerHTML=''; }
 function coHits(q){
+  if(/[\u3100-\u312F\u31A0-\u31BF\u02C7\u02CA\u02CB\u02D9]/.test(q)) return `<div class="it" style="color:var(--muted)">選好中文字後就會開始搜尋…</div>`;
   const hits = q ? Object.entries(DATA.stockList).filter(([id,[n]])=>id.startsWith(q)||n.includes(q)).slice(0,12) : [];
   return hits.length?hits.map(([id,[n,m,ind]])=>`<div class="it"><span><b class="num">${id}</b> ${esc(n)} <small style="color:var(--muted)">${m==='tpex'?'上櫃':'上市'}｜${esc(ind)}</small></span>${S.me.companies.includes(id)?'<span class="st na">已加入</span>':`<button class="btn sm pri" data-act="addOne" data-id="${id}">加入</button>`}</div>`).join(''):`<div class="it" style="color:var(--muted)">${q?'找不到符合的公司':'開始輸入以搜尋 '+Object.keys(DATA.stockList).length+' 家公司'}</div>`;
 }
@@ -1205,7 +1206,8 @@ const INP={ q:v=>{S.q=v; renderKeep('q');}, eq:v=>{S.etf.q=v; renderKeep('eq');}
 document.addEventListener('click',e=>{ const el=e.target.closest('[data-act]'); if(!el||el.disabled) return; const f=A[el.dataset.act]; if(f){ if(el.dataset.act!=='closeBg') e.preventDefault(); f(el.dataset,e);} });
 document.addEventListener('change',e=>{ const el=e.target.closest('[data-chg]'); if(!el) return; CHG[el.dataset.chg]?.(el.value,el.dataset,el); });
 document.addEventListener('input',e=>{ if(e.isComposing) return; const el=e.target.closest('[data-inp]'); if(!el) return; INP[el.dataset.inp]?.(el.value); });
-document.addEventListener('compositionend',e=>{ const el=e.target.closest?.('[data-inp]'); if(!el) return; INP[el.dataset.inp]?.(el.value); });
+document.addEventListener('compositionstart',e=>{ if(e.target.id==='aq'){ const el=$('#hits'); if(el) el.innerHTML=`<div class="it" style="color:var(--muted)">選好中文字後就會開始搜尋…</div>`; } });
+document.addEventListener('compositionend',e=>{ const el=e.target.closest?.('[data-inp]'); if(!el) return; setTimeout(()=>INP[el.dataset.inp]?.(el.value),0); });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
 function renderKeep(id){ const el=document.getElementById(id), pos=el?.selectionStart; render(); const n=document.getElementById(id); if(n){ n.focus(); try{n.setSelectionRange(pos,pos)}catch(e){} } }
 
