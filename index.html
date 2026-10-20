@@ -387,7 +387,9 @@ function persist(){
   if(S.mode==='db' && S.db && S.uid){
     saveQ = saveQ.then(()=>S.db.doc('members/'+S.uid).set({...body, joinedAt:S.joinedAt||Date.now()})).catch(e=>toast('儲存失敗：'+(e.code||e.message)));
   } else { try{ localStorage.setItem('compass-me', JSON.stringify(body)); }catch(e){} }
+  persistHook();
 }
+function persistHook(){ ghSync(); }
 const canWrite = () => S.mode!=='db' || S.isOwner || S.approved;
 
 /* ---------- 瀏覽器資料更新（Claude 桌面 App） ---------- */
@@ -642,9 +644,61 @@ function chipSection(id){
   return h;
 }
 
+/* ---------- 追蹤清單同步到 GitHub（權杖只存在使用者自己的瀏覽器） ---------- */
+const GH={owner:'tiamoschen-8833',repo:'stock-compass',path:'watchlist.json'};
+const onPages=/github\.io$/.test(location.hostname);
+function ghToken(){ try{ return localStorage.getItem('compass-gh')||''; }catch(e){ return ''; } }
+function ghState(){ try{ return JSON.parse(localStorage.getItem('compass-gh-state')||'null'); }catch(e){ return null; } }
+let ghT;
+function ghSync(now){ if(!onPages||!ghToken()) return; clearTimeout(ghT); ghT=setTimeout(ghPush, now?0:2500); }
+async function ghPush(){
+  const url=`https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
+  const hd={Authorization:'Bearer '+ghToken(), Accept:'application/vnd.github+json'};
+  let st;
+  try{
+    let sha; const g=await fetch(url+'?ref=main',{headers:hd,cache:'no-store'});
+    if(g.ok) sha=(await g.json()).sha; else if(g.status!==404) throw new Error(g.status===401?'權杖無效或已過期':g.status===403?'權杖沒有寫入權限':'GitHub 回應 '+g.status);
+    const body={watch:S.me.watch, groups:S.me.groups, sig:S.me.sig||null, sigBy:S.me.sigBy||{}, updatedAt:new Date().toISOString()};
+    const content=btoa(unescape(encodeURIComponent(JSON.stringify(body,null,2))));
+    const p=await fetch(url,{method:'PUT',headers:hd,body:JSON.stringify({message:'同步追蹤清單（'+S.me.watch.length+' 檔）',content,sha})});
+    if(!p.ok) throw new Error(p.status===401?'權杖無效或已過期':p.status===403||p.status===404?'權杖沒有此專案的寫入權限':'GitHub 回應 '+p.status);
+    st={ok:true,at:Date.now(),n:S.me.watch.length};
+  }catch(e){ st={ok:false,at:Date.now(),err:e.message||String(e)}; }
+  try{ localStorage.setItem('compass-gh-state',JSON.stringify(st)); }catch(e){}
+  if(!st.ok) toast('追蹤清單同步失敗：'+st.err,6000);
+  if(S.view==='watch') render();
+}
+let SIG_REMOTE=null;
+async function loadRemoteSignals(){ if(!onPages) return; try{ const r=await fetch('signals.json?t='+Date.now(),{cache:'no-store'}); if(r.ok){ SIG_REMOTE=await r.json(); if(S.view==='watch') render(); } }catch(e){} }
+function notifyPanel(){
+  if(!onPages) return `<div class="panel" style="margin-bottom:14px;font-size:13.5px"><b>收盤後自動通知</b>　自動通知讀取的是 GitHub 網站版的追蹤清單，請在 tiamoschen-8833.github.io/stock-compass 管理追蹤個股。</div>`;
+  const tok=!!ghToken(), st=ghState(), R=SIG_REMOTE;
+  const when=t=>new Date(t).toLocaleString('zh-TW',{hour12:false,month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  return `<div class="panel" style="margin-bottom:14px"><div class="h-row"><h4>收盤後自動通知</h4><button class="btn sm" data-act="ghSetup">${tok?'同步設定':'設定同步'}</button></div>
+    <div class="mini" style="grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:8px">
+      <div>追蹤清單同步<b class="${tok&&st?.ok?'':'flat'}">${!tok?'尚未設定':st?.ok?'已同步 '+when(st.at):st?'失敗：'+esc(st.err):'待同步'}</b></div>
+      <div>最近一次自動檢查<b>${R?esc(R.date)+(R.complete?'':'（資料未完整）'):'尚無紀錄'}</b></div>
+      <div>可評估進場<b>${R?.stocks?R.stocks.filter(x=>x.status==='可評估進場').length+' 檔／共 '+R.stocks.length+' 檔':'—'}</b></div></div>
+    <p class="cap" style="margin:8px 0 0">每個交易日收盤後由 GitHub 自動計算四道閘門，再由 Claude 推播摘要到您的手機。${tok?'':'需先完成一次同步設定，系統才會知道您追蹤哪些個股。'}</p></div>`;
+}
+function ghModal(){
+  const tok=ghToken();
+  modal(`<button class="btn sm ghost x" data-act="close">關閉</button><h3>追蹤清單同步設定</h3>
+    <p style="font-size:13.5px;color:var(--muted);margin:4px 0 10px">網站需要一把只能修改「stock-compass」專案的 GitHub 權杖，才能把追蹤清單存到專案裡。權杖只儲存在這個瀏覽器，不會放進網站程式碼。</p>
+    <ol style="font-size:13.5px;padding-left:20px;margin:0 0 12px;display:grid;gap:4px">
+      <li>開啟 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">github.com/settings/personal-access-tokens/new</a></li>
+      <li>Token name 填「財報羅盤同步」，Expiration 選 1 年（或自訂）</li>
+      <li>Repository access 選 <b>Only select repositories</b> → 勾選 <b>stock-compass</b></li>
+      <li>Permissions → Repository permissions → <b>Contents</b> 改成 <b>Read and write</b></li>
+      <li>按 Generate token，複製以 <code>github_pat_</code> 開頭的權杖，貼到下方</li></ol>
+    <div class="field"><label for="ghTok">GitHub 權杖</label><input id="ghTok" type="password" autocomplete="off" placeholder="${tok?'已設定（重新貼上可更換）':'github_pat_…'}"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">${tok?'<button class="btn danger" data-act="ghRemove">移除權杖</button>':''}<button class="btn" data-act="ghNow" ${tok?'':'disabled'}>立即同步</button><button class="btn pri" data-act="ghSave">儲存並同步</button></div>`);
+}
+
 /* ---------- 視圖：追蹤 ---------- */
 function viewWatch(){
   let h=topbar('Personal learning center','追蹤中個股',`<button class="btn" data-act="updWatch">↻ 更新追蹤個股</button><button class="btn gold" data-act="addCo">＋ 自動加入公司</button>`);
+  h+=notifyPanel();
   if(!S.me.watch.length) return h+`<div class="empty">☆<b>尚未追蹤任何個股</b>在「財報健檢」查看公司時，按「加入追蹤」即可集中管理。<div style="margin-top:12px"><button class="btn pri" data-act="nav" data-v="health">前往財報健檢</button></div></div>`;
   const rows=S.me.watch.map(id=>({id,M:analyze(id),E:co(id)?signalEval(id):null}));
   const env=rows.find(r=>r.E)?.E.env;
@@ -1185,6 +1239,10 @@ const A={
   updAll:()=>runUpdate(scopeIds(),'更新全部公司'), updOne:()=>runUpdate([S.sel],'更新 '+nameOf(S.sel)), updMarket:()=>updateMarket(),
   open:d=>{S.sel=d.id; S.scope='all'; A.nav({v:'health'});}, goTech:d=>{S.tech.id=d.id; A.nav({v:'tech'});},
   days:d=>{S.tech.days=+d.v; render();},
+  ghSetup:()=>ghModal(),
+  ghSave:()=>{ const v=$('#ghTok').value.trim(); if(v){ if(!/^(github_pat_|ghp_)/.test(v)){ toast('權杖格式不正確，應以 github_pat_ 開頭'); return; } try{ localStorage.setItem('compass-gh',v); }catch(e){ toast('此瀏覽器無法儲存權杖'); return; } } closeModal(); toast('同步中…'); ghSync(true); },
+  ghNow:()=>{ closeModal(); toast('同步中…'); ghSync(true); },
+  ghRemove:()=>{ try{ localStorage.removeItem('compass-gh'); localStorage.removeItem('compass-gh-state'); }catch(e){} closeModal(); render(); toast('已移除權杖，追蹤清單不再同步'); },
   sgOpen:d=>{ S.sigId=d.id; A.nav({v:'signal'}); },
   updSig:()=>runUpdate([S.sigId],'更新 '+nameOf(S.sigId)),
   updWatch:()=>runUpdate(S.me.watch.filter(id=>S.me.companies.includes(id)),'更新追蹤個股'),
@@ -1247,6 +1305,7 @@ try{ S.market=JSON.parse(localStorage.getItem('compass-market')||'null'); }catch
 if(!S.me.companies.includes(S.sel)) S.sel=S.me.companies[0];
 readHash();
 render();
+loadRemoteSignals();
 
 (async()=>{
   if(!window.claude?.use) return;
