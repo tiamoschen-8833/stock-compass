@@ -974,7 +974,7 @@ function sgStruct(px,i){
     if(H_(run)>=st.L*(1+SG.rebound) && t>run && Lo(t)<=H_(run)*(1-SG.pull)){ k=run; pullAt=t; break; } }
   if(k==null){ st.Hc=null; for(let t=iL;t<=i;t++) if(st.Hc==null||H_(t)>st.Hc) st.Hc=H_(t); return st; }
   st.k=k; st.H=H_(k);
-  let b=null; for(let t=pullAt;t<=i;t++) if(C(t)>st.H){ b=t; break; }
+  let b=null; for(let t=pullAt;t<=i;t++) if(C(t)>st.H && C(t-1)<=st.H) b=t;   // 取最近一次站上 H 的突破日
   const end=b??i+1; let j2=pullAt; for(let t=pullAt;t<end;t++) if(Lo(t)<=Lo(j2)) j2=t;
   st.j2=j2; st.L2=Lo(j2); st.b=b;
   st.L2ok = j2<i || b!=null;   // 今日才出現的低點尚未確認
@@ -1000,8 +1000,9 @@ function signalEval(id,i0){
   else if(!S0.L2ok) it(1,'b','no',`回檔進行中，今日低點 ${nf(S0.L2)} 尚待確認`);
   else it(1,'b','ok',`第二低點 L2 ${nf(S0.L2)}（${px[S0.j2][0]}）高於 L ${nf(S0.L)}`);
   const gapUp=O(i)>H_(i-1)*(1+SG.gap), big=chg>=SG.surge;
-  const formedToday = S0.b===i;
-  it(1,'c', (big||gapUp)&&(S0.H==null||!S0.L2ok||formedToday)?'no':'ok', (big||gapUp)?`今日${big?'大漲 '+pct(chg):''}${big&&gapUp?'且':''}${gapUp?'跳空開高':''}，${(S0.H==null||!S0.L2ok||formedToday)?'結構主要由單日走勢形成，不視為完成打底':'但結構在此之前已成形'}`:`今日 ${pct(chg)}，非單日長紅造成`);
+  const formed = S0.H!=null&&S0.L2ok&&S0.j2<i;
+  it(1,'c', (big||gapUp)&&!formed?'no':'ok', (big||gapUp)?`今日${big?'大漲 '+pct(chg):''}${big&&gapUp?'且':''}${gapUp?'跳空開高':''}，${!formed?'結構主要由單日走勢形成，不視為完成打底':'但 L、L2 結構在此之前已成形'}`:`今日 ${pct(chg)}，非單日長紅造成`);
+  if((big||gapUp)&&S0.b===i) R.notes.push('今日以長紅突破 H，單日表現不等於反轉完成，需等 1–5 日回測確認。');
   // ── 閘門 2｜量價確認
   const avg=(a,b)=>{ if(b<=a) return null; let x=0; for(let t=a;t<b;t++) x+=V(t); return x/(b-a); };
   const decV=avg(S0.iP,S0.iL+1);
@@ -1024,7 +1025,7 @@ function signalEval(id,i0){
   if(S0.b==null||close<S0.H) it(3,'d','no','尚未有效突破，無回測可確認');
   else { let tested=null; for(let t=S0.b+1;t<=Math.min(i,S0.b+SG.retestDays);t++) if(Lo(t)<=S0.H*(1+SG.retestTol)) tested=t;
     let broke=false; for(let t=S0.b+1;t<=i;t++) if(C(t)<S0.H*(1-SG.retestTol)) broke=true;
-    it(3,'d', tested!=null&&!broke?'ok':'no', tested!=null?`${px[tested][0]} 回測至 ${nf(Lo(tested))}，收盤守住 H`:i-S0.b<1?'今日剛突破，尚待回測':`突破後 ${i-S0.b} 日內尚未回測 H 附近`); }
+    it(3,'d', tested!=null&&!broke?'ok':'no', broke?`突破後曾收盤跌破 H 達 ${SG.retestTol*100}% 以上，支撐不穩`:tested!=null?`${px[tested][0]} 回測至 ${nf(Lo(tested))}，收盤守住 H`:i-S0.b<1?'今日剛突破，尚待 1–5 日回測':`突破後 ${i-S0.b} 日內尚未回測 H 附近`); }
   const m20s=ma(20,i)/ma(20,i-5)-1; R.ma20slope=m20s;
   if(m20s<-.01) R.notes.push(`20 日均線 5 日內下彎 ${pct(m20s,false)}，即使突破也較適合視為「反彈」而非完整反轉。`);
   // ── 閘門 4｜交易可行性與風險控制
