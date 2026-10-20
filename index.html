@@ -194,6 +194,13 @@ td.best{color:var(--good);font-weight:700}
 .peer-l{display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px}
 .peer-s{width:100%;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;padding:6px 8px;font-size:13.5px;text-align:left}
 .peer-t td.peer-p{font-size:12px;color:var(--muted);white-space:normal}
+.cwrap{position:relative}
+#kchart{touch-action:pan-y;cursor:crosshair}
+.ctip{position:absolute;z-index:5;min-width:168px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 12px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:12.5px;pointer-events:none}
+.ctip-h{font-family:var(--f-num);font-weight:600;margin-bottom:4px;color:var(--accent)}
+.ctip div:not(.ctip-h){display:flex;justify-content:space-between;gap:14px;line-height:1.7}
+.ctip span{color:var(--muted)}
+.ctip b{font-family:var(--f-num);font-weight:600;font-variant-numeric:tabular-nums}
 .bt-list{display:grid;gap:12px}
 .bt-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.4fr);gap:16px;margin-top:10px}
 .bt-rule{margin-bottom:8px}
@@ -780,7 +787,8 @@ function candle(px,days){
   const m5=ma(5),m20=ma(20),m60=ma(60);
   const hi=Math.max(...seg.map(x=>x[2]),...m20.filter(Boolean)), lo=Math.min(...seg.map(x=>x[3]),...m20.filter(Boolean));
   const pad=(hi-lo)*.06, top=hi+pad, bot=lo-pad, Y=v=>T+(top-v)/(top-bot)*PH; const vmax=Math.max(...seg.map(x=>x[5]));
-  let s=`<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="K 線圖"><g class="grid">`;
+  CANDLE={seg,m5,m20,m60,W,H,L,R,T,PH,VT,VH,bw,Y,prev:start>0?px[start-1][4]:null};
+  let s=`<div class="cwrap"><svg class="chart" id="kchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="K 線圖，滑鼠移到 K 線可查看當日價格"><g class="grid">`;
   for(let i=0;i<=4;i++){const v=bot+(top-bot)*i/4, y=Y(v); s+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}"/><text x="${L-6}" y="${y+4}" text-anchor="end">${v>=1000?Math.round(v):v.toFixed(v<20?2:1)}</text>`;}
   s+=`<line x1="${L}" x2="${W-R}" y1="${VT+VH}" y2="${VT+VH}"/></g>`;
   seg.forEach((x,i)=>{const [d,o,hh,ll,c,v]=x; const cx=L+i*bw+bw/2, col=c>=o?'var(--up)':'var(--down)', w=Math.max(1,bw*.62);
@@ -789,8 +797,27 @@ function candle(px,days){
   const line=(arr,col)=>{const pts=arr.map((v,i)=>v==null?null:`${L+i*bw+bw/2},${Y(v)}`).filter(Boolean); return pts.length>1?`<polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="1.6"/>`:'';};
   s+=line(m60,'var(--ma60)')+line(m20,'var(--ma20)')+line(m5,'var(--ma5)');
   const tick=[0,Math.floor(seg.length/2),seg.length-1]; tick.forEach(i=>{s+=`<text x="${Math.min(W-R-20,Math.max(L+20,L+i*bw+bw/2))}" y="${H-4}" text-anchor="middle">${seg[i][0].slice(5).replace('-','/')}</text>`;});
-  s+=`<text x="${L}" y="${VT-6}">成交量（張）</text></svg>`; return s;
+  s+=`<text x="${L}" y="${VT-6}">成交量（張）</text><g id="kcross" style="display:none;pointer-events:none"><rect id="kband" y="${T}" height="${VT+VH-T}" fill="var(--ink)" opacity=".07"/><line id="kvline" y1="${T}" y2="${VT+VH}" stroke="var(--muted)" stroke-dasharray="3 3"/><line id="khline" x1="${L}" x2="${W-R}" stroke="var(--muted)" stroke-dasharray="3 3"/></g></svg><div class="ctip" id="ktip" hidden></div></div>`; return s;
 }
+let CANDLE=null;
+function kHover(e){
+  const svg=$('#kchart'); if(!svg||!CANDLE) return; const C=CANDLE, r=svg.getBoundingClientRect();
+  const xv=(e.clientX-r.left)/r.width*C.W; const i=Math.floor((xv-C.L)/C.bw);
+  const tip=$('#ktip'), g=$('#kcross');
+  if(i<0||i>=C.seg.length||e.clientY<r.top||e.clientY>r.bottom){ tip.hidden=true; g.style.display='none'; return; }
+  const [d,o,h,l,c,v]=C.seg[i]; const pc=i>0?C.seg[i-1][4]:C.prev; const ch=pc?c-pc:null, cr=pc?c/pc-1:null;
+  const cx=C.L+i*C.bw+C.bw/2;
+  g.style.display=''; $('#kband').setAttribute('x',C.L+i*C.bw); $('#kband').setAttribute('width',C.bw);
+  $('#kvline').setAttribute('x1',cx); $('#kvline').setAttribute('x2',cx); $('#khline').setAttribute('y1',C.Y(c)); $('#khline').setAttribute('y2',C.Y(c));
+  const row=(k,val,cl='')=>`<div><span>${k}</span><b class="${cl}">${val}</b></div>`;
+  tip.innerHTML=`<div class="ctip-h">${d.replace(/-/g,'/')}</div>${row('開盤',nf(o))}${row('最高',nf(h),'up')}${row('最低',nf(l),'down')}${row('收盤',nf(c),cls(ch))}${row('漲跌',ch==null?'—':(ch>0?'+':'')+nf(ch)+'（'+pct(cr,true,2)+'）',cls(ch))}${row('成交量',nf(v,0)+' 張')}${row('MA5',nf(C.m5[i]))}${row('MA20',nf(C.m20[i]))}${C.m60[i]?row('MA60',nf(C.m60[i])):''}`;
+  tip.hidden=false;
+  const wrap=svg.parentElement.getBoundingClientRect(), px=(cx/C.W)*r.width+(r.left-wrap.left), tw=tip.offsetWidth;
+  tip.style.left=(px+14+tw>wrap.width? px-14-tw : px+14)+'px';
+  tip.style.top=Math.max(4,(e.clientY-wrap.top)-tip.offsetHeight/2)+'px';
+}
+document.addEventListener('pointermove',e=>{ if(e.target.closest?.('#kchart')) kHover(e); else if($('#ktip')&&!$('#ktip').hidden){ $('#ktip').hidden=true; const g=$('#kcross'); if(g) g.style.display='none'; } });
+document.addEventListener('pointerdown',e=>{ if(e.target.closest?.('#kchart')) kHover(e); });
 
 /* ---------- 視圖：ETF ---------- */
 const ETF_TYPES=['全部','台股市值','高股息','主動式','海外股票','債券','商品／期貨','槓桿／反向'];
