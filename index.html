@@ -1148,12 +1148,14 @@ function viewAdmin(){
 /* ---------- Modal ---------- */
 function modal(html){ $('#layer').innerHTML=`<div class="modal-bg" data-act="closeBg"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`; const f=$('#layer input'); f&&f.focus(); }
 function closeModal(){ $('#layer').innerHTML=''; }
-function addCoModal(q=''){
+function coHits(q){
   const hits = q ? Object.entries(DATA.stockList).filter(([id,[n]])=>id.startsWith(q)||n.includes(q)).slice(0,12) : [];
+  return hits.length?hits.map(([id,[n,m,ind]])=>`<div class="it"><span><b class="num">${id}</b> ${esc(n)} <small style="color:var(--muted)">${m==='tpex'?'上櫃':'上市'}｜${esc(ind)}</small></span>${S.me.companies.includes(id)?'<span class="st na">已加入</span>':`<button class="btn sm pri" data-act="addOne" data-id="${id}">加入</button>`}</div>`).join(''):`<div class="it" style="color:var(--muted)">${q?'找不到符合的公司':'開始輸入以搜尋 '+Object.keys(DATA.stockList).length+' 家公司'}</div>`;
+}
+function addCoModal(q=''){
   modal(`<button class="btn sm ghost x" data-act="close">關閉</button><h3>自動加入公司</h3><p style="color:var(--muted);font-size:13.5px;margin:0 0 10px">輸入上市櫃公司代號或名稱。已有內建資料的公司會立即顯示；其他公司會自動向 FinMind 抓取財報（約需 10 秒）。</p>
     <div class="field"><label for="aq">代號或名稱</label><input id="aq" data-inp="aq" value="${esc(q)}" placeholder="例如 2412 或 中華電" autocomplete="off"></div>
-    <div class="list" id="hits">${hits.length?hits.map(([id,[n,m,ind]])=>`<div class="it"><span><b class="num">${id}</b> ${esc(n)} <small style="color:var(--muted)">${m==='tpex'?'上櫃':'上市'}｜${esc(ind)}</small></span>${S.me.companies.includes(id)?'<span class="st na">已加入</span>':`<button class="btn sm pri" data-act="addOne" data-id="${id}">加入</button>`}</div>`).join(''):`<div class="it" style="color:var(--muted)">${q?'找不到符合的公司':'開始輸入以搜尋 '+Object.keys(DATA.stockList).length+' 家公司'}</div>`}</div>`);
-  const i=$('#aq'); if(i){i.setSelectionRange(q.length,q.length);}
+    <div class="list" id="hits">${coHits(q)}</div>`);
 }
 function groupsModal(){
   const gs=S.me.groups;
@@ -1199,10 +1201,11 @@ const CHG={
   cfg:(v,d)=>{ const n=+v; if(!(n>0)) return; S.me.sig={...sgCfg(),[d.k]:n}; persist(); render(); },
   assign:(v,d)=>{ for(const g in S.me.groups) S.me.groups[g]=S.me.groups[g].filter(x=>x!==d.id); if(v) S.me.groups[v].push(d.id); persist(); render(); }
 };
-const INP={ q:v=>{S.q=v; renderKeep('q');}, eq:v=>{S.etf.q=v; renderKeep('eq');}, aq:v=>addCoModal(v.trim()) };
+const INP={ q:v=>{S.q=v; renderKeep('q');}, eq:v=>{S.etf.q=v; renderKeep('eq');}, aq:v=>{ const el=$('#hits'); if(el) el.innerHTML=coHits(v.trim()); } };
 document.addEventListener('click',e=>{ const el=e.target.closest('[data-act]'); if(!el||el.disabled) return; const f=A[el.dataset.act]; if(f){ if(el.dataset.act!=='closeBg') e.preventDefault(); f(el.dataset,e);} });
 document.addEventListener('change',e=>{ const el=e.target.closest('[data-chg]'); if(!el) return; CHG[el.dataset.chg]?.(el.value,el.dataset,el); });
-document.addEventListener('input',e=>{ const el=e.target.closest('[data-inp]'); if(!el) return; INP[el.dataset.inp]?.(el.value); });
+document.addEventListener('input',e=>{ if(e.isComposing) return; const el=e.target.closest('[data-inp]'); if(!el) return; INP[el.dataset.inp]?.(el.value); });
+document.addEventListener('compositionend',e=>{ const el=e.target.closest?.('[data-inp]'); if(!el) return; INP[el.dataset.inp]?.(el.value); });
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); });
 function renderKeep(id){ const el=document.getElementById(id), pos=el?.selectionStart; render(); const n=document.getElementById(id); if(n){ n.focus(); try{n.setSelectionRange(pos,pos)}catch(e){} } }
 
