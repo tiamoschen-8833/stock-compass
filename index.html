@@ -1424,25 +1424,17 @@ function ifEtf(id){
   const ed=etfData(); const row=c=>{ const p=ed[c]?.px||[]; if(p.length<6) return `<tr><td>${c}</td><td colspan="4" style="color:var(--muted)">尚無成交資料</td></tr>`;
     const k=p.length-1, v5=p.slice(-5).reduce((a,x)=>a+x[5],0)/5, n20=Math.min(20,p.length), v20=p.slice(-n20).reduce((a,x)=>a+x[5],0)/n20;
     return `<tr><td><span class="num">${c}</span> ${esc(nameOf(c))}</td><td class="num">${nf(p[k][5],0)}</td><td class="num">${nf(v5,0)}</td><td class="num">${(v5/v20*100).toFixed(0)}%</td><td class="num">${p[k][0]}</td></tr>`; };
-  const C=S.etfCalc||{};
-  const est=C.u!=null&&C.nav!=null&&C.w!=null?C.u*1000*C.nav*C.w/100/1e8:null;
-  return h+`<div class="grid if-2"><div class="panel"><h4>次級市場成交量</h4><p class="cap">單位：張｜成交放量不代表基金獲得新資金</p>
+  return h+`<div class="panel"><h4>次級市場成交量</h4><p class="cap">單位：張｜成交放量不代表基金獲得新資金</p>
     <div class="tbl-wrap"><table class="mini-t"><thead><tr><th>ETF</th><th>當日量</th><th>近 5 日均量</th><th>5 日／20 日</th><th>資料日</th></tr></thead><tbody>${row('0050')}${row('0056')}</tbody></table></div>
     <h4 style="margin-top:14px">初級市場受益權單位</h4>
     <div class="banner" style="margin:6px 0 0"><b>資料狀態：尚未串接</b>　目前資料源（FinMind 免費資料）未提供受益權單位數、每日申贖與成分股持股變化，本區不以估算代替。請至發行商公告查詢：<a href="https://www.yuantaetfs.com/" target="_blank" rel="noopener">元大投信 ETF 專區</a>（0050、0056）、<a href="https://www.twse.com.tw/zh/ETFortune/" target="_blank" rel="noopener">證交所 ETF e添富</a>。</div>
-    <p class="cap" style="margin:10px 0 0">本股是否為 0050／0056 成分股及其權重，請以發行商最新公告為準；系統未驗證前不推定。</p></div>
-    <div class="panel"><h4>新增曝險試算（使用者輸入）</h4><p class="cap">新增受益權單位 × 每單位淨值 × 成分股權重，僅為近似值，不是當日實際買入金額</p>
-    <div class="bar" style="margin:0"><div class="field"><label for="ecU">受益權單位淨增減（千單位）</label><input id="ecU" type="number" step="any" data-chg="etfCalc" data-k="u" value="${C.u??''}"></div>
-      <div class="field"><label for="ecN">每單位淨值（元）</label><input id="ecN" type="number" step="any" data-chg="etfCalc" data-k="nav" value="${C.nav??''}"></div>
-      <div class="field"><label for="ecW">${esc(nameOf(id))} 權重（%）</label><input id="ecW" type="number" step="any" data-chg="etfCalc" data-k="w" value="${C.w??''}"></div></div>
-    <div style="margin-top:10px;font-size:14px">估算新增曝險：<b class="num" style="font-size:18px">${est!=null?nf(est,2)+' 億元':'—'}</b>${est!=null?`（約 ${nf(est*1e8/(R_close(id)*1000),0)} 張，以最新收盤估算）`:''}</div>
+    <p class="cap" style="margin:10px 0 0">本股是否為 0050／0056 成分股及其權重，請以發行商最新公告為準；系統未驗證前不推定。</p>
     <ul style="font-size:12.5px;color:var(--muted);margin:10px 0 0;padding-left:18px;line-height:1.7">
       <li>淨申購可透過實物申購、既有庫存或調整交易完成，不必然形成投信當日現貨買超。</li>
       <li>台積電上漲會使其在市值加權組合中的權重自然提高，不代表 ETF 必須額外買入。</li>
       <li>0056 與 0050 的追蹤指數、選股與權重規則不同，不可把 0056 淨申購推算成台積電買盤。</li>
-      <li>比對申購變化與法人買賣超時，請依 T−1、T、T+1、T+2 的時序觀察，並標註公告落後天數。</li></ul></div></div></section>`;
+      <li>比對申購變化與法人買賣超時，請依 T−1、T、T+1、T+2 的時序觀察，並標註公告落後天數。</li></ul></div></section>`;
 }
-function R_close(id){ const p=adjPx(co(id)?.px||[]); return p.at(-1)?.[4]||1; }
 function ifSummary(R,id){
   const k=R.key, one={A:'外資賣、投信買，股價未再破低，屬「疑似」承接，尚未有價格確認。',B:'股價在區間內整理、法人方向不一，等待方向表態；盤整也可能向下突破。',C:'外資轉買並搭配價格突破，反轉訊號增強，但不等同未來必然上漲。',D:'法人動向與價格表現互相矛盾，反轉未確認，宜回查類股與個股細節。',N:'法人與價格尚未形成規則中的任何型態，維持觀察。',X:'資料不足，暫不判讀。'}[k];
   return `<div class="hero" style="grid-template-columns:minmax(0,1fr)"><div><div class="eyebrow">法人動態總結</div>
@@ -1561,7 +1553,6 @@ const CHG={
   et:v=>{S.etf.type=v; render();}, em:v=>{S.etf.mkt=v; render();}, es:v=>{S.etf.sort=v; render();}, bd:v=>{S.brief.date=v.slice(0,10); render();},
   cmp:(v,d,el)=>{ const c=S.etf.cmp; const i=c.indexOf(d.id); if(el.checked&&i<0){ if(c.length>=3){el.checked=false; toast('最多比較 3 檔'); return;} c.push(d.id);} else if(!el.checked&&i>=0) c.splice(i,1); render(); },
   cfg:(v,d)=>{ const n=+v; if(!(n>0)) return; const id=S.sigId; S.me.sigBy={...(S.me.sigBy||{}),[id]:{...sgCfg(id),[d.k]:n}}; persist(); render(); },
-  etfCalc:(v,d)=>{ const n=v===''?null:+v; S.etfCalc={...(S.etfCalc||{}),[d.k]:isFinite(n)?n:null}; render(); },
   cfgReset:()=>{ const b={...(S.me.sigBy||{})}; delete b[S.sigId]; S.me.sigBy=b; persist(); render(); },
   assign:(v,d)=>{ for(const g in S.me.groups) S.me.groups[g]=S.me.groups[g].filter(x=>x!==d.id); if(v) S.me.groups[v].push(d.id); persist(); render(); }
 };
