@@ -99,6 +99,11 @@ button,input,select{font:inherit;color:inherit}
 .h-row{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .st.bull{background:var(--bad-soft);color:var(--up)} .st.bear{background:var(--good-soft);color:var(--down)} .st.flat{background:var(--sunk);color:var(--muted)}
 table.mini-t th,table.mini-t td{padding:6px 8px;font-size:13px}
+.grid.if-2{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}
+@media (max-width:1100px){.grid.if-2{grid-template-columns:1fr}}
+.if-row{display:grid;grid-template-columns:120px minmax(0,1fr);gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;line-height:1.6}
+.if-row:last-child{border-bottom:0}
+@media (max-width:520px){.if-row{grid-template-columns:1fr;gap:2px}}
 @media (max-width:1100px){.grid.g4,.grid.g5{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:520px){.grid.g4,.grid.g5{grid-template-columns:1fr}}
 .m{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 14px;display:flex;flex-direction:column;gap:3px;min-width:0}
@@ -448,7 +453,7 @@ async function fetchCompany(id, step){
   step('外資持股'); const hold=(await bget(`dataset=TaiwanStockShareholding&data_id=${id}&start_date=${d110}`)).map(x=>[x.date,x.ForeignInvestmentSharesRatio]);
   step('融資融券'); const mg=(await bget(`dataset=TaiwanStockMarginPurchaseShortSale&data_id=${id}&start_date=${d110}`)).map(x=>[x.date,x.MarginPurchaseTodayBalance,x.ShortSaleTodayBalance,x.MarginPurchaseLimit]);
   if(!Object.keys(fs).length) throw {code:'nodata', message:'查無財報資料（可能為金融股、ETF 或新上市公司）'};
-  return {n:info.stock_name||nameOf(id), i:info.industry_category||'', m:info.type||'', fs, bs, cf, mr, px, per:pr?[pr.PER,pr.PBR,pr.dividend_yield,pr.date]:null, chip:{inst,hold,mg}, upd:Date.now()};
+  return {n:info.stock_name||nameOf(id), i:info.industry_category||'', m:info.type||'', fs, bs, cf, mr, px, per:pr?[pr.PER,pr.PBR,pr.dividend_yield,pr.date]:null, chip:{inst,hold,mg,inst2:instSplit(ins)}, upd:Date.now()};
 }
 async function saveCache(id,data){
   S.cache[id]=data; memo.clear();
@@ -1181,6 +1186,7 @@ function viewSignal(){
   const id=S.sigId; const cfg=sgCfg(id); const custom=!!S.me.sigBy?.[id];
   let h=`<div style="margin-bottom:6px"><button class="btn sm ghost" data-act="nav" data-v="watch">← 追蹤中個股</button></div>`;
   h+=topbar('Signal analysis', esc(nameOf(id))+' <span class="num" style="font-size:20px;color:var(--muted)">'+id+'</span>　訊號分析',`<button class="btn" data-act="updSig">↻ 更新此公司</button>`);
+  h+=sigTabs(); if(S.sigTab==='inst') return h+instView(id);
   const E=id&&co(id)?signalEval(id):null;
   if(!E) return h+`<div class="empty"><b>尚無 ${esc(nameOf(id))} 的行情資料</b>按「更新此公司」取得資料後即可分析。</div>`;
   const P=E.i>0?signalEval(id,E.i-1):null;
@@ -1223,6 +1229,255 @@ function sgSpark(px,i,E){
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" style="height:${H}px" role="img" aria-label="近 80 日收盤與關鍵價位">${ln(E.L,'var(--down)','L')}${ln(E.L2&&E.L2!==E.L?E.L2:null,'var(--down)','L2')}${ln(E.H,'var(--accent)','H')}${ln(E.stop,'var(--bad)','停損')}${ln(E.target,'var(--good)','目標')}
     <polyline points="${seg.map((x,t)=>X(t)+','+Y(x[4])).join(' ')}" fill="none" stroke="var(--ink)" stroke-width="1.6"/><circle cx="${X(seg.length-1)}" cy="${Y(seg.at(-1)[4])}" r="3" fill="var(--ink)"/></svg>`;
 }
+
+/* ---------- 法人動態分析模組 V01（研究輔助；只讀取四道閘門的計算結果，不改動其規則與評分） ---------- */
+const IF_SRC='FinMind（整理自臺灣證券交易所、櫃買中心盤後三大法人資料）';
+const IF_LABEL={A:'疑似吸收',B:'整理觀察',C:'同步轉強',D:'訊號分歧',N:'訊號不明顯',X:'資料不足'};
+const IF_FULL={A:'疑似賣壓吸收',B:'底部整理觀察中',C:'反轉確認訊號增強',D:'訊號分歧／反轉未確認',N:'法人與價格未形成可辨識型態',X:'資料不足，暫不判讀'};
+const IF_TONE={A:'warn',B:'na',C:'good',D:'bad',N:'na',X:'na'};
+// FinMind 個股原始列 → [日期, 外資(含外資自營商), 投信, 自營商自行買賣, 自營商避險, 自營商未拆分]（張）
+function instSplit(rows){
+  const m={}; for(const x of rows||[]){ const r=(m[x.date]=m[x.date]||[x.date,0,0,0,0,0]); const n=(x.buy-x.sell)/1000, k=x.name||'';
+    if(/^Foreign/.test(k)) r[1]+=n; else if(k==='Investment_Trust') r[2]+=n; else if(/Hedging/i.test(k)) r[4]+=n; else if(/^Dealer_?self/i.test(k)) r[3]+=n; else if(/^Dealer/.test(k)) r[5]+=n; }
+  return Object.values(m).sort((a,b)=>a[0]<b[0]?-1:1).map(r=>[r[0],...r.slice(1).map(v=>Math.round(v))]);
+}
+// FinMind 大盤三大法人 → [日期, 外資, 投信, 自營自行, 自營避險, 自營未拆分]（億元）
+function instMktSplit(rows){
+  const m={}; for(const x of rows||[]){ const k=x.name||''; if(/total/i.test(k)) continue; const r=(m[x.date]=m[x.date]||[x.date,0,0,0,0,0]); const n=(x.buy-x.sell)/1e8;
+    if(/^Foreign/.test(k)) r[1]+=n; else if(k==='Investment_Trust') r[2]+=n; else if(/Hedging/i.test(k)) r[4]+=n; else if(/^Dealer_?self/i.test(k)) r[3]+=n; else if(/^Dealer/.test(k)) r[5]+=n; }
+  return Object.values(m).sort((a,b)=>a[0]<b[0]?-1:1).map(r=>[r[0],...r.slice(1).map(v=>Math.round(v*100)/100)]);
+}
+function ifStats(rows,k){
+  const has=rows.length&&rows.every(r=>r[k]!=null); if(!has) return null;
+  const sum=n=>rows.length>=n?rows.slice(-n).reduce((a,r)=>a+r[k],0):null;
+  let n=0,sg=0; for(let t=rows.length-1;t>=0;t--){ const s=Math.sign(rows[t][k]); if(!s) break; if(!sg) sg=s; if(s!==sg) break; n++; }
+  return {d1:sum(1),d3:sum(3),d5:sum(5),d10:sum(10),streak:n*sg};
+}
+function instEval(id){
+  const c=co(id), ch=chipOf(id); const X={id,key:'X',ev:[],lim:[]};
+  if(!c||!ch) return {...X,lim:['尚無此公司的法人資料']};
+  const px=adjPx(c.px); const cut=px.adjusted?.[0]||null;
+  const split=!!ch.inst2?.length;
+  let rows=split?ch.inst2:(ch.inst||[]).map(r=>[r[0],r[1],r[2],null,null,r[3]]);
+  if(cut) rows=rows.filter(r=>r[0]>=cut);
+  const R={...X,split,cut,rows,instDate:rows.at(-1)?.[0]||null,pxDate:px.at(-1)?.[0]||null};
+  if(!split) R.lim.push('目前快取的自營商資料未拆分「自行買賣」與「避險」，請按「更新法人資料」重新取得。');
+  if(cut) R.lim.push(`${cut} 有股本變動，之前的法人張數不納入比較。`);
+  if(rows.length<10||px.length<46){ R.lim.push('法人或行情資料少於判讀所需的天數。'); return R; }
+  if(R.instDate!==R.pxDate) R.lim.push(`法人資料日 ${R.instDate} 與行情日 ${R.pxDate} 不一致，判讀以兩者最新資料為準，可能有時間差。`);
+  R.F=ifStats(rows,1); R.T=ifStats(rows,2); R.DS=split?ifStats(rows,3):null; R.DH=split?ifStats(rows,4):null; R.DX=split?null:ifStats(rows,5);
+  const i=px.length-1, H_=x=>px[x][2], Lo=x=>px[x][3], C=x=>px[x][4], V=x=>px[x][5];
+  const vol20=MA(px.map(x=>x[5]),20,i-1); R.vol20=vol20;
+  const E=signalEval(id); const S0=sgStruct(px,i), S1=sgStruct(px,i-1); R.E=E; R.S0=S0;
+  const close=C(i); R.close=close; R.chg=close/C(i-1)-1;
+  R.L=S0.L; R.L2=S0.L2??null; R.H=S0.H??null; R.Hc=S0.Hc??null;
+  let hi10=-Infinity,lo10=Infinity; for(let t=i-9;t<=i;t++){ hi10=Math.max(hi10,H_(t)); lo10=Math.min(lo10,Lo(t)); } R.hi10=hi10; R.lo10=lo10;
+  R.top=R.H??R.Hc??hi10;            // 整理區上緣：優先用四道閘門的反彈高點 H
+  R.floor=R.L2&&S0.L2ok?R.L2:R.L;    // 失效價位：已確認 L2 用 L2，否則用前低 L
+  const F=R.F, T=R.T, sgn=v=>v>0?1:v<0?-1:0, small=v=>Math.abs(v)<vol20*.05;
+  const newLow=i-S0.iL<=2;
+  let tested=null; for(let t=Math.max(S0.iL+3,i-9);t<=i;t++) if(Lo(t)<=S0.L*1.03&&C(t)>=S0.L) tested=t;
+  const fr=rows.slice(-5).map(r=>r[1]); const fRec=(fr[3]+fr[4])/2, fPrev=(fr[0]+fr[1]+fr[2])/3;
+  const fShrink=fRec<0&&fPrev<0&&Math.abs(fRec)<Math.abs(fPrev)*.7;
+  const dn=[]; for(let t=i-4;t<=i;t++) if(C(t)<C(t-1)) dn.push(V(t)); const dnV=dn.length?dn.reduce((a,b)=>a+b,0)/dn.length:null;
+  const dnShrink=dnV!=null&&dnV<vol20*.9;
+  const width=hi10/lo10-1; let lA=Infinity,lB=Infinity; for(let t=i-4;t<=i;t++) lA=Math.min(lA,Lo(t)); for(let t=i-9;t<=i-5;t++) lB=Math.min(lB,Lo(t));
+  const lowsUp=lA>=lB;
+  const vol5=(V(i)+V(i-1)+V(i-2)+V(i-3)+V(i-4))/5, volConv=vol5<vol20*.85;
+  const rng=(a,b)=>{ let x=0; for(let t=a;t<=b;t++) x+=(H_(t)-Lo(t))/C(t); return x/(b-a+1); }; const atrConv=rng(i-4,i)<rng(i-19,i-5)*.85;
+  const brk=S0.b!=null&&i-S0.b<=10, hold=brk&&close>=S0.H; const brkVol=S0.b!=null?V(S0.b)/MA(px.map(x=>x[5]),20,S0.b-1):null;
+  const fTurn=F.d3>0&&rows.slice(-10,-3).reduce((a,r)=>a+r[1],0)<0;
+  const brokeLow=S1.L!=null&&close<S1.L, instBuy=F.d5+T.d5>0;
+  let flip=false; { const k=rows.length-1, today=rows[k][1]; let n=0,s=0; for(let t=k-1;t>=0&&rows[t][1]>0;t--){ n++; s+=rows[t][1]; } flip=today<0&&n>=2&&n<=4&&Math.abs(today)>s; R.flipN=n; }
+  const fellBack=E?.invalid==='疑似假突破';
+  Object.assign(R,{newLow,tested,fShrink,dnShrink,width,lowsUp,volConv,atrConv,brk,hold,brkVol,fTurn,brokeLow,flip,vol5});
+  const ev=R.ev, add=(ok,t)=>ev.push([ok,t]);
+  const fx=v=>`${v>0?'買':'賣'}超 ${nf(Math.abs(v),0)} 張`;
+  // D｜假突破／訊號轉弱（優先檢查）
+  const dHits=[];
+  if(instBuy&&brokeLow) dHits.push(`近 5 日外資＋投信合計${fx(F.d5+T.d5)}，但今日收盤 ${nf(close)} 跌破前一日低點 ${nf(S1.L)}`);
+  if(fellBack) dHits.push(`${px[S0.b][0]} 突破 H ${nf(S0.H)} 後收盤跌回 H 下方（四道閘門已標示疑似假突破）`);
+  if(flip) dHits.push(`外資先連買 ${R.flipN} 日，今日轉為${fx(rows.at(-1)[1])}，超過前幾日買超合計`);
+  if(dHits.length){ R.key='D'; dHits.forEach(t=>add(true,t)); R.strength=dHits.length>=2?'證據充分':'部分符合'; }
+  // C｜籌碼與價格同步轉強
+  else if(brk&&hold&&(fTurn||F.streak>=2)){
+    R.key='C';
+    add(true, fTurn?`外資由賣轉買：近 3 日${fx(F.d3)}，之前 7 日為淨賣超`:`外資連續 ${F.streak} 日買超（近 5 日${fx(F.d5)}）`);
+    add(true,`${px[S0.b][0]} 收盤突破整理區上緣 H ${nf(S0.H)}，目前 ${nf(close)} 仍在其上`);
+    const b=[brkVol>=SG.volBreak, !fellBack&&close>=S0.H*(1-SG.retestTol), T.d5>0];
+    add(b[0],`突破日量為 20 日均量的 ${brkVol!=null?brkVol.toFixed(2):'—'} 倍${b[0]?'':'（未達 1.3 倍）'}`);
+    add(b[2],`投信近 5 日${fx(T.d5)}${b[2]?'，同步買進（輔助）':'（輔助條件，非必要）'}`);
+    const n=b.filter(Boolean).length; R.strength=n>=2&&b[0]?'證據充分':'部分符合';
+  }
+  // A｜賣壓吸收觀察
+  else if(F.d5<0&&T.d5>0&&!newLow){
+    R.key='A';
+    add(true,`外資近 5 日${fx(F.d5)}、投信近 5 日${fx(T.d5)}，方向相反`);
+    add(true,`近 3 日未再創低，前低 L ${nf(S0.L)}（${px[S0.iL][0]}）`);
+    const b=[F.d10<0&&T.d10>0, tested!=null, fShrink, dnShrink];
+    add(b[0],`近 10 日外資${fx(F.d10)}、投信${fx(T.d10)}${b[0]?'，分歧具持續性':'，10 日尺度未維持同樣分歧'}`);
+    add(b[1], tested!=null?`${px[tested][0]} 回測前低附近（低點 ${nf(Lo(tested))}）收盤未跌破`:'近 10 日沒有回測前低的紀錄');
+    add(b[2], fShrink?`外資賣超縮小：近 2 日平均 ${nf(Math.abs(fRec),0)} 張，前 3 日平均 ${nf(Math.abs(fPrev),0)} 張`:'外資賣超尚未明顯縮小');
+    add(b[3], dnV!=null?`近 5 日下跌日均量 ${nf(dnV,0)} 張，為 20 日均量的 ${(dnV/vol20*100).toFixed(0)}%${dnShrink?'，下跌量縮':''}`:'近 5 日無下跌日');
+    const n=b.filter(Boolean).length; R.strength=n>=3?'證據充分':'部分符合';
+  }
+  // B｜底部盤整觀察
+  else if(width<=.10&&lowsUp&&(sgn(F.d5)!==sgn(T.d5)||(small(F.d5)&&small(T.d5)))&&!newLow){
+    R.key='B';
+    add(true,`近 10 日在 ${nf(lo10)}–${nf(hi10)} 區間震盪（寬度 ${pct(width,false)}），近 5 日低點 ${nf(lA)} 不低於前 5 日 ${nf(lB)}`);
+    add(true,`外資近 5 日${fx(F.d5)}、投信${fx(T.d5)}，法人方向${sgn(F.d5)!==sgn(T.d5)?'分歧':'皆不明顯'}`);
+    add(volConv,`近 5 日均量為 20 日均量的 ${(vol5/vol20*100).toFixed(0)}%${volConv?'，量能收斂':''}`);
+    add(atrConv, atrConv?'近 5 日振幅較前 15 日收斂':'振幅尚未明顯收斂');
+    R.strength=volConv&&atrConv?'證據充分':'部分符合';
+  }
+  else { R.key='N'; R.strength='不足';
+    add(false,`外資近 5 日${fx(F.d5)}、投信近 5 日${fx(T.d5)}`);
+    add(false, newLow?`近 3 日仍在創低（L ${nf(S0.L)}，${px[S0.iL][0]}）`:`收盤 ${nf(close)}，整理區上緣 ${nf(R.top)}、前低 ${nf(S0.L)}`);
+  }
+  // 確認／失效／風控
+  const vNeed=nf(vol20*SG.volBreak,0);
+  const T_={
+    A:[`收盤有效突破整理區上緣 ${nf(R.top)}，且當日量 ≥ 20 日均量 1.3 倍（約 ${vNeed} 張）；其後 1–5 日回測不破可增加可信度。`,`收盤跌破前低 ${nf(S0.L)}，或突破後迅速跌回區間。`],
+    B:[`收盤突破區間上緣 ${nf(Math.max(hi10,R.top))} 且量能放大（≥ ${vNeed} 張）；盤整也可能向下突破，未突破前不視為反轉。`,`收盤跌破區間下緣 ${nf(lo10)}（盤整向下突破）。`],
+    C:[`突破後 1–5 日回測 ${nf(S0.H)} 附近收盤守住，外資買超延續；仍須通過四道閘門的風控條件。`,`收盤跌回 H 下方 ${SG.retestTol*100}% 以上（約 ${nf((S0.H||0)*(1-SG.retestTol))}），或跌破 ${R.L2&&S0.L2ok?'L2 '+nf(R.L2):'前低 '+nf(S0.L)}。`],
+    D:[`重新收盤站回 ${nf(S0.H??R.top)} 之上並守住，且法人買超與價格方向一致後再重新評估。`,`目前即屬反轉未確認狀態；若再收低於 ${nf(Math.min(close,S0.L))}，視為弱勢延續。`],
+    N:[`等待法人方向與價格結構出現一致變化（例如突破 ${nf(R.top)} 且量能配合）。`,`收盤跌破前低 ${nf(S0.L)}。`],
+  }[R.key];
+  R.confirm=T_[0]; R.invalid=T_[1];
+  R.invalidPx = R.key==='C'?(R.L2&&S0.L2ok?R.L2:S0.L) : R.key==='B'?lo10 : S0.L;
+  const cfg=sgCfg(id), loss=cfg.capital*cfg.risk/100, stopPct=R.invalidPx<close?1-R.invalidPx/close:null;
+  R.risk={loss, stopPct, pos:stopPct?Math.min(loss/stopPct,cfg.capital):null, capped:!!stopPct&&loss/stopPct>cfg.capital, tight:!!stopPct&&stopPct<.02};
+  R.conf={A:'尚待價格確認',B:'尚待方向表態',C:'價格已確認，仍需回測與風控',D:'訊號互相矛盾',N:'證據不足'}[R.key];
+  return R;
+}
+function ifSec(n,t,p){ return `<section class="sec"><div class="sec-h"><span class="n">${n}</span><h3>${t}</h3><p>${p}</p></div>`; }
+function ifBadge(k){ return `<span class="st ${IF_TONE[k]}">${IF_LABEL[k]}</span>`; }
+const ifz=(v,d=0)=>v==null?'—':(v>0?'+':'')+nf(v,d);
+const ifStreak=s=>!s?'—':`連${s>0?'買':'賣'} ${Math.abs(s)} 日`;
+function ifTable(R){
+  const rowsDef=[['外資（含外資自營商）',R.F],['投信',R.T]];
+  if(R.split){ rowsDef.push(['自營商｜自行買賣',R.DS],['自營商｜避險',R.DH]); }
+  else rowsDef.push(['自營商（未拆分）',R.DX]);
+  return `<div class="tbl-wrap"><table class="mini-t"><thead><tr><th>法人</th><th>當日</th><th>近 3 日</th><th>近 5 日</th><th>近 10 日</th><th>連續</th></tr></thead><tbody>
+    ${rowsDef.map(([n,s])=>`<tr><td>${n}</td>${s?['d1','d3','d5','d10'].map(k=>`<td class="num ${cls(s[k])}">${ifz(s[k])}</td>`).join('')+`<td>${ifStreak(s.streak)}</td>`:'<td colspan="5" style="color:var(--muted)">未揭露／尚未更新</td>'}</tr>`).join('')}
+    </tbody></table></div>`;
+}
+function ifDaily(R,id){
+  const px=adjPx(co(id).px), pm={}; px.forEach((x,k)=>pm[x[0]]=k);
+  const seg=R.rows.slice(-10).reverse();
+  return `<div class="tbl-wrap" style="margin-top:10px"><table class="mini-t"><thead><tr><th>日期</th><th>收盤</th><th>漲跌</th><th>量（張）</th><th>外資</th><th>投信</th>${R.split?'<th>自營自行</th><th>自營避險</th>':'<th>自營商</th>'}</tr></thead><tbody>
+    ${seg.map(r=>{ const k=pm[r[0]]; const c=k!=null?px[k][4]:null, d=k>0?px[k][4]/px[k-1][4]-1:null;
+      return `<tr><td class="num">${r[0].slice(5)}</td><td class="num">${nf(c)}</td><td class="num ${cls(d)}">${pct(d,true,2)}</td><td class="num">${k!=null?nf(px[k][5],0):'—'}</td><td class="num ${cls(r[1])}">${ifz(r[1])}</td><td class="num ${cls(r[2])}">${ifz(r[2])}</td>${R.split?`<td class="num ${cls(r[3])}">${ifz(r[3])}</td><td class="num">${ifz(r[4])}</td>`:`<td class="num ${cls(r[5])}">${ifz(r[5])}</td>`}</tr>`; }).join('')}
+    </tbody></table></div><p class="cap" style="margin:6px 0 0">單位：張；正數為買超（紅）、負數為賣超（綠）。自營商避險多與權證、期貨等避險部位有關，不直接解讀為看多或看空。</p>`;
+}
+function ifMarket(){
+  const M=S.instMkt; let h=ifSec('03','大盤層','三大法人全市場買賣超（單位：億元），只描述整體資金方向，不推定個股');
+  if(!M?.rows?.length) return h+`<div class="empty"><b>尚未取得大盤法人資料</b>按上方「↻ 更新法人資料」取得最新三大法人全市場買賣超。</div></section>`;
+  const rows=M.rows, st=k=>ifStats(rows,k);
+  const L=[['外資',st(1)],['投信',st(2)],['自營商｜自行買賣',st(3)],['自營商｜避險',st(4)]];
+  const ux=st(5); if(ux&&rows.slice(-10).some(r=>r[5])) L.push(['自營商（未拆分）',ux]);
+  const f=L[0][1], t=L[1][1];
+  const dir=f&&t?(Math.sign(f.d5)===Math.sign(t.d5)?`外資與投信近 5 日同為${f.d5>0?'買':'賣'}超`:`外資近 5 日${f.d5>0?'買':'賣'}超、投信${t.d5>0?'買':'賣'}超，方向分歧`):'';
+  return h+`<div class="panel"><p class="cap">資料日 ${rows.at(-1)[0]}｜更新 ${new Date(M.upd).toLocaleString('zh-TW',{hour12:false})}｜來源 ${IF_SRC}</p>
+    <div class="tbl-wrap"><table class="mini-t"><thead><tr><th>法人</th><th>當日</th><th>近 3 日</th><th>近 5 日</th><th>近 10 日</th><th>連續</th></tr></thead><tbody>
+    ${L.map(([n,s])=>`<tr><td>${n}</td>${s?['d1','d3','d5','d10'].map(k=>`<td class="num ${cls(s[k])}">${ifz(s[k],2)}</td>`).join('')+`<td>${ifStreak(s.streak)}</td>`:'<td colspan="5" style="color:var(--muted)">未揭露</td>'}</tr>`).join('')}
+    </tbody></table></div>${dir?`<p style="margin:10px 0 0;font-size:13.5px"><b>${dir}</b>。大盤總額為分類彙總，不能據此推定單一個股或同一機構的動向。</p>`:''}</div></section>`;
+}
+function ifSector(id){
+  let h=ifSec('04','類股層','依你的自訂群組彙總；以「近 5 日買超家數」呈現，避免把不同股價的張數直接相加');
+  const G=Object.entries(S.me.groups||{}).filter(([g,ids])=>ids.length);
+  if(!G.length) return h+`<div class="empty"><b>尚未建立群組</b>在「財報健檢」的群組管理中建立類股群組後即可比較。</div></section>`;
+  const my=groupOf(id);
+  const rowsH=G.map(([g,ids])=>{
+    const st=ids.map(x=>{ const ch=chipOf(x), c=co(x); if(!ch?.inst?.length||!c) return null; const r=ch.inst; if(r.length<10) return null;
+      const s=(n,k,o=0)=>r.slice(r.length-n-o,r.length-o).reduce((a,y)=>a+y[k],0); const p=adjPx(c.px); const k=p.length-1;
+      return {f5:s(5,1),t5:s(5,2),f3:s(3,1),f10p:s(7,1,3),p5:k>=5?p[k][4]/p[k-5][4]-1:null,date:r.at(-1)[0]}; }).filter(Boolean);
+    if(!st.length) return `<tr><td>${esc(g)}${g===my?' ★':''}</td><td colspan="5" style="color:var(--muted)">群組內尚無法人資料</td></tr>`;
+    const n=st.length, fb=st.filter(x=>x.f5>0).length, tb=st.filter(x=>x.t5>0).length, rb=st.filter(x=>x.f3>0&&x.f10p<0).length;
+    const ps=st.map(x=>x.p5).filter(v=>v!=null), pa=ps.length?ps.reduce((a,b)=>a+b,0)/ps.length:null;
+    const ds=[...new Set(st.map(x=>x.date))].sort();
+    const tag = fb/n>=.6&&tb/n>=.6?['bull','資金集中流入'] : fb/n<=.4&&tb/n<=.4?['bear','法人撤退'] : rb/n>=.5?['flat','短期回補'] : ['flat','輪動／分歧'];
+    return `<tr><td>${esc(g)}${g===my?' <span class="st na">本股所屬</span>':''}</td><td class="num">${fb}/${n}</td><td class="num">${tb}/${n}</td><td class="num ${cls(pa)}">${pct(pa)}</td><td><span class="st ${tag[0]}">${tag[1]}</span></td><td class="num" style="font-size:12px">${ds.length>1?ds[0].slice(5)+'～'+ds.at(-1).slice(5):ds[0]}</td></tr>`;
+  }).join('');
+  return h+`<div class="panel"><div class="tbl-wrap"><table class="mini-t"><thead><tr><th>群組</th><th>外資近 5 日買超家數</th><th>投信近 5 日買超家數</th><th>平均 5 日漲跌</th><th>資金狀態</th><th>資料日</th></tr></thead><tbody>${rowsH}</tbody></table></div>
+    <p class="cap" style="margin:8px 0 0">資金狀態規則：外資與投信買超家數皆 ≥ 60% 為「集中流入」；皆 ≤ 40% 為「撤退」；半數以上個股外資近 3 日轉買、前 7 日淨賣為「短期回補」；其餘為「輪動／分歧」。資料日不一致時以區間顯示，請先更新群組內個股。</p></div></section>`;
+}
+function ifPrice(R,id){
+  let h=ifSec('02','價量驗證','前低、整理區上緣與突破沿用四道閘門的結構計算（觀察視窗 '+SG.win+' 個交易日）');
+  const E=R.E, S0=R.S0, px=adjPx(co(id).px);
+  const chk=(ok,t,d)=>`<div class="read"><span class="i ${ok?'good':'warn'}">${ok?'✓':'!'}</span><div><b>${t}</b><p>${d}</p></div></div>`;
+  const items=[
+    chk(!R.newLow,'前低是否守住',R.newLow?`近 3 日仍在創低，前低 L ${nf(S0.L)}（${px[S0.iL][0]}）`:`前低 L ${nf(S0.L)}（${px[S0.iL][0]}），近 3 日未再破低`),
+    chk(R.tested!=null,'回測前低',R.tested!=null?`${px[R.tested][0]} 回測至 ${nf(px[R.tested][3])} 後收盤守住`:'近 10 日沒有回測前低附近'),
+    chk(R.hold,'突破整理區上緣',S0.H==null?`尚無反彈高點 H；目前上緣參考 ${nf(R.top)}`:R.hold?`${px[S0.b][0]} 突破 H ${nf(S0.H)}，目前仍在其上`:S0.b!=null?`曾於 ${px[S0.b][0]} 突破 H ${nf(S0.H)}，目前收盤 ${nf(R.close)}`:`收盤 ${nf(R.close)} 尚未突破 H ${nf(S0.H)}`),
+    chk(R.brkVol!=null&&R.brkVol>=SG.volBreak,'突破量能',R.brkVol!=null?`突破日量為 20 日均量的 ${R.brkVol.toFixed(2)} 倍（門檻 ${SG.volBreak} 倍）`:'尚無突破日可檢查'),
+    chk(R.volConv,'量能收斂',`近 5 日均量 ${nf(R.vol5,0)} 張，為 20 日均量 ${nf(R.vol20,0)} 張的 ${(R.vol5/R.vol20*100).toFixed(0)}%`),
+    chk(((R.F.d5+R.T.d5)>0&&R.chg>=0&&!R.newLow)||((R.F.d5+R.T.d5)<0&&(R.newLow||R.chg<0)),'法人與價格是否一致',`外資近 5 日${R.F.d5>0?'買':'賣'}超、投信${R.T.d5>0?'買':'賣'}超；收盤 ${nf(R.close)}，距上緣 ${pct(R.top/R.close-1,false)}`)
+  ];
+  return h+`<div class="grid if-2"><div class="panel">${sgSpark(px,px.length-1,{L:S0.L,L2:S0.L2ok?S0.L2:null,H:S0.H??R.top,stop:null,target:null})}
+    <div class="mini" style="grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px"><div>前低 L<b>${nf(S0.L)}</b></div><div>第二低 L2<b>${S0.L2ok&&S0.L2?nf(S0.L2):'—'}</b></div><div>整理區上緣<b>${nf(R.top)}</b></div><div>近 10 日區間<b>${nf(R.lo10)}–${nf(R.hi10)}</b></div><div>20 日均量<b>${nf(R.vol20,0)}</b></div><div>四道閘門狀態<b style="font-family:var(--f-body);font-size:13px">${E?.status||'—'}</b></div></div>
+    <p class="cap" style="margin:8px 0 0">整理區上緣優先採四道閘門的反彈高點 H；尚無 H 時改用低點後的最高價。四道閘門的判定不受本模組影響。</p></div>
+    <div class="panel">${items.join('')}</div></div></section>`;
+}
+function ifEtf(id){
+  let h=ifSec('05','ETF 關聯','分開看「次級市場成交量」與「初級市場受益權單位淨增減」');
+  const ed=etfData(); const row=c=>{ const p=ed[c]?.px||[]; if(p.length<6) return `<tr><td>${c}</td><td colspan="4" style="color:var(--muted)">尚無成交資料</td></tr>`;
+    const k=p.length-1, v5=p.slice(-5).reduce((a,x)=>a+x[5],0)/5, n20=Math.min(20,p.length), v20=p.slice(-n20).reduce((a,x)=>a+x[5],0)/n20;
+    return `<tr><td><span class="num">${c}</span> ${esc(nameOf(c))}</td><td class="num">${nf(p[k][5],0)}</td><td class="num">${nf(v5,0)}</td><td class="num">${(v5/v20*100).toFixed(0)}%</td><td class="num">${p[k][0]}</td></tr>`; };
+  const C=S.etfCalc||{};
+  const est=C.u!=null&&C.nav!=null&&C.w!=null?C.u*1000*C.nav*C.w/100/1e8:null;
+  return h+`<div class="grid if-2"><div class="panel"><h4>次級市場成交量</h4><p class="cap">單位：張｜成交放量不代表基金獲得新資金</p>
+    <div class="tbl-wrap"><table class="mini-t"><thead><tr><th>ETF</th><th>當日量</th><th>近 5 日均量</th><th>5 日／20 日</th><th>資料日</th></tr></thead><tbody>${row('0050')}${row('0056')}</tbody></table></div>
+    <h4 style="margin-top:14px">初級市場受益權單位</h4>
+    <div class="banner" style="margin:6px 0 0"><b>資料狀態：尚未串接</b>　目前資料源（FinMind 免費資料）未提供受益權單位數、每日申贖與成分股持股變化，本區不以估算代替。請至發行商公告查詢：<a href="https://www.yuantaetfs.com/" target="_blank" rel="noopener">元大投信 ETF 專區</a>（0050、0056）、<a href="https://www.twse.com.tw/zh/ETFortune/" target="_blank" rel="noopener">證交所 ETF e添富</a>。</div>
+    <p class="cap" style="margin:10px 0 0">本股是否為 0050／0056 成分股及其權重，請以發行商最新公告為準；系統未驗證前不推定。</p></div>
+    <div class="panel"><h4>新增曝險試算（使用者輸入）</h4><p class="cap">新增受益權單位 × 每單位淨值 × 成分股權重，僅為近似值，不是當日實際買入金額</p>
+    <div class="bar" style="margin:0"><div class="field"><label for="ecU">受益權單位淨增減（千單位）</label><input id="ecU" type="number" step="any" data-chg="etfCalc" data-k="u" value="${C.u??''}"></div>
+      <div class="field"><label for="ecN">每單位淨值（元）</label><input id="ecN" type="number" step="any" data-chg="etfCalc" data-k="nav" value="${C.nav??''}"></div>
+      <div class="field"><label for="ecW">${esc(nameOf(id))} 權重（%）</label><input id="ecW" type="number" step="any" data-chg="etfCalc" data-k="w" value="${C.w??''}"></div></div>
+    <div style="margin-top:10px;font-size:14px">估算新增曝險：<b class="num" style="font-size:18px">${est!=null?nf(est,2)+' 億元':'—'}</b>${est!=null?`（約 ${nf(est*1e8/(R_close(id)*1000),0)} 張，以最新收盤估算）`:''}</div>
+    <ul style="font-size:12.5px;color:var(--muted);margin:10px 0 0;padding-left:18px;line-height:1.7">
+      <li>淨申購可透過實物申購、既有庫存或調整交易完成，不必然形成投信當日現貨買超。</li>
+      <li>台積電上漲會使其在市值加權組合中的權重自然提高，不代表 ETF 必須額外買入。</li>
+      <li>0056 與 0050 的追蹤指數、選股與權重規則不同，不可把 0056 淨申購推算成台積電買盤。</li>
+      <li>比對申購變化與法人買賣超時，請依 T−1、T、T+1、T+2 的時序觀察，並標註公告落後天數。</li></ul></div></div></section>`;
+}
+function R_close(id){ const p=adjPx(co(id)?.px||[]); return p.at(-1)?.[4]||1; }
+function ifSummary(R,id){
+  const k=R.key, one={A:'外資賣、投信買，股價未再破低，屬「疑似」承接，尚未有價格確認。',B:'股價在區間內整理、法人方向不一，等待方向表態；盤整也可能向下突破。',C:'外資轉買並搭配價格突破，反轉訊號增強，但不等同未來必然上漲。',D:'法人動向與價格表現互相矛盾，反轉未確認，宜回查類股與個股細節。',N:'法人與價格尚未形成規則中的任何型態，維持觀察。',X:'資料不足，暫不判讀。'}[k];
+  return `<div class="hero" style="grid-template-columns:minmax(0,1fr)"><div><div class="eyebrow">法人動態總結</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin-top:6px"><span style="font-size:22px;font-family:var(--f-display);font-weight:600">${IF_FULL[k]}</span>${ifBadge(k)}
+    <span class="st ${R.strength==='證據充分'?'good':R.strength==='部分符合'?'warn':'na'}">強弱等級：${R.strength||'不足'}</span></div>
+    <p style="margin:8px 0 0;font-size:14.5px">${one}</p>
+    <p class="cap" style="margin:6px 0 0">強弱等級是規則符合程度，不是上漲機率。法人資料日 ${R.instDate||'—'}｜行情日 ${R.pxDate||'—'}</p></div></div>`;
+}
+function ifConclusion(R,id){
+  let h=ifSec('06','結論與風控','每一項結論都附依據、確認條件、失效條件與資料日期');
+  const cfg=sgCfg(id);
+  const rk=R.risk.pos?`依此個股的四道閘門設定（總資金 ${nf(cfg.capital,0)} 元、單筆風險 ${cfg.risk}%），可承受損失 ${nf(R.risk.loss,0)} 元；若以失效價 ${nf(R.invalidPx)} 為停損（距現價 ${pct(R.risk.stopPct,false)}），部位上限約 ${nf(R.risk.pos,0)} 元${R.risk.capped?'（已以總資金為上限）':''}。${R.risk.tight?'停損距離不到 2%，容易被正常波動觸發，宜等待結構更明確或改用更寬的失效價位並縮小部位。':''}`:'失效價位不在現價下方，無法以此試算部位。';
+  const lim=[...R.lim,'三大法人為分類彙總，不能推定同一機構連續買賣；投信買超不等於全部來自 ETF。','模組規則尚未經歷史回測與樣本外驗證，屬研究輔助，不是已證實的預測模型。'];
+  return h+`<div class="panel" style="border-left:3px solid var(--accent)">
+    <div class="if-row"><b>目前狀態</b><div>${IF_FULL[R.key]} ${ifBadge(R.key)}</div></div>
+    <div class="if-row"><b>判讀依據</b><div>${R.ev.map(([ok,t])=>`<div>${ok?'✓':'・'} ${t}</div>`).join('')}</div></div>
+    <div class="if-row"><b>確認條件</b><div>${R.confirm}</div></div>
+    <div class="if-row"><b>失效條件</b><div>${R.invalid}</div></div>
+    <div class="if-row"><b>風險控管</b><div>若採提前布局，應先設定部位上限、可承受損失與退出規則，不以法人連買天數單獨決定進場。${rk}</div></div>
+    <div class="if-row"><b>可信程度</b><div>${R.strength}；${R.conf}</div></div>
+    <div class="if-row"><b>資料日期／來源</b><div>法人 ${R.instDate}、行情 ${R.pxDate}｜${IF_SRC}｜單位：張</div></div>
+    <div class="if-row"><b>資料限制</b><div>${lim.map(t=>`<div>・${t}</div>`).join('')}</div></div></div></section>`;
+}
+function instView(id){
+  const R=instEval(id);
+  let h=`<div class="bar" style="justify-content:space-between"><p style="margin:0;color:var(--muted);font-size:14px;max-width:80ch">觀察外資、投信、自營商的資金流向與價格反應。法人訊號只是<b>輔助證據</b>，必須和價格結構交叉驗證，不等於買賣指令。</p><button class="btn" data-act="updInst">↻ 更新法人資料</button></div>`;
+  if(R.key==='X'){ return h+ifSummary(R,id)+`<div class="empty"><b>${esc(nameOf(id))} 的法人資料不足</b>${R.lim.map(esc).join('<br>')}</div>`+ifMarket()+ifSector(id)+ifEtf(id); }
+  h+=ifSummary(R,id);
+  if(R.lim.length) h+=`<div class="banner warn">${R.lim.map(esc).join('<br>')}</div>`;
+  h+=ifSec('01','個股法人對照',`${esc(nameOf(id))}（${id}）｜資料日 ${R.instDate}｜單位：張`)+`<div class="panel">${ifTable(R)}${ifDaily(R,id)}</div></section>`;
+  h+=ifPrice(R,id)+ifMarket()+ifSector(id)+ifEtf(id)+ifConclusion(R,id);
+  h+=`<div class="foot-notes"><div class="panel"><p><b>判讀順序</b>　先看大盤，再看類股，最後核對個股；不以大盤法人方向推定單一股票。</p></div><div class="panel"><p><b>型態規則</b>　依序檢查：訊號分歧 → 同步轉強 → 疑似吸收 → 整理觀察；皆不符合時顯示「訊號不明顯」。</p></div><div class="panel"><p><b>風險提醒</b>　本頁為學習與研究工具，不構成投資建議；實際資料請以證交所、櫃買中心與發行商公告為準。</p></div></div>`;
+  return h;
+}
+function sigTabs(){ const t=S.sigTab||'gate'; return `<div class="chips" role="tablist" style="margin:-4px 0 16px">${[['gate','四道閘門'],['inst','法人動態']].map(([v,l])=>`<button class="chip" role="tab" aria-selected="${t===v}" aria-pressed="${t===v}" data-act="sigTab" data-v="${v}">${l}</button>`).join('')}</div>`; }
 
 /* ---------- 視圖：後台 ---------- */
 function viewAdmin(){
@@ -1280,6 +1535,13 @@ const A={
   ghRemove:()=>{ try{ localStorage.removeItem('compass-gh'); localStorage.removeItem('compass-gh-state'); }catch(e){} closeModal(); render(); toast('已移除權杖，追蹤清單不再同步'); },
   sgOpen:d=>{ S.sigId=d.id; A.nav({v:'signal'}); },
   updSig:()=>runUpdate([S.sigId],'更新 '+nameOf(S.sigId)),
+  sigTab:d=>{ S.sigTab=d.v; render(true); },
+  updInst:async()=>{ if(S.busy) return; const id=S.sigId;
+    S.busy={label:'更新法人資料', done:0, total:1, note:'大盤三大法人'}; render();
+    try{ const r=await bget(`dataset=TaiwanStockTotalInstitutionalInvestors&start_date=${dstr(new Date(Date.now()-40*864e5))}`);
+      if(r.length){ S.instMkt={rows:instMktSplit(r), upd:Date.now()}; try{ localStorage.setItem('compass-instmkt',JSON.stringify(S.instMkt)); }catch(e){} } }
+    catch(e){ toast('大盤法人資料：'+hostError(e),7000); }
+    S.busy=null; await runUpdate([id],'更新 '+nameOf(id)); },
   updWatch:()=>runUpdate(S.me.watch.filter(id=>S.me.companies.includes(id)),'更新追蹤個股'),
   btJump:d=>{ document.getElementById('bt-'+d.id)?.scrollIntoView({behavior:'smooth',block:'start'}); },
   etfFav:d=>{const f=S.me.etfFav,i=f.indexOf(d.id); i<0?f.push(d.id):f.splice(i,1); persist(); render();},
@@ -1299,6 +1561,7 @@ const CHG={
   et:v=>{S.etf.type=v; render();}, em:v=>{S.etf.mkt=v; render();}, es:v=>{S.etf.sort=v; render();}, bd:v=>{S.brief.date=v.slice(0,10); render();},
   cmp:(v,d,el)=>{ const c=S.etf.cmp; const i=c.indexOf(d.id); if(el.checked&&i<0){ if(c.length>=3){el.checked=false; toast('最多比較 3 檔'); return;} c.push(d.id);} else if(!el.checked&&i>=0) c.splice(i,1); render(); },
   cfg:(v,d)=>{ const n=+v; if(!(n>0)) return; const id=S.sigId; S.me.sigBy={...(S.me.sigBy||{}),[id]:{...sgCfg(id),[d.k]:n}}; persist(); render(); },
+  etfCalc:(v,d)=>{ const n=v===''?null:+v; S.etfCalc={...(S.etfCalc||{}),[d.k]:isFinite(n)?n:null}; render(); },
   cfgReset:()=>{ const b={...(S.me.sigBy||{})}; delete b[S.sigId]; S.me.sigBy=b; persist(); render(); },
   assign:(v,d)=>{ for(const g in S.me.groups) S.me.groups[g]=S.me.groups[g].filter(x=>x!==d.id); if(v) S.me.groups[v].push(d.id); persist(); render(); }
 };
@@ -1311,11 +1574,11 @@ document.addEventListener('compositionend',e=>{ const el=e.target.closest?.('[da
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeModal(); if(e.key==='Enter'&&e.target.classList?.contains('wc')) A.sgOpen(e.target.dataset); });
 function renderKeep(id){ const el=document.getElementById(id), pos=el?.selectionStart; render(); const n=document.getElementById(id); if(n){ n.focus(); try{n.setSelectionRange(pos,pos)}catch(e){} } }
 
-function hashToken(){ return S.view + (S.view==='health'?'-'+S.sel : S.view==='tech'?'-'+S.tech.id : S.view==='signal'&&S.sigId?'-'+S.sigId : ''); }
+function hashToken(){ return S.view + (S.view==='health'?'-'+S.sel : S.view==='tech'?'-'+S.tech.id : S.view==='signal'&&S.sigId?'-'+S.sigId+(S.sigTab==='inst'?'-inst':'') : ''); }
 function syncHash(push){ const t='#'+hashToken(); if(location.hash===t) return; try{ history[push?'pushState':'replaceState'](null,'',t); }catch(e){ try{ location.hash=t; }catch(_){} } }
 function readHash(){
   const h=(location.hash||'').slice(1); if(!h) return false;
-  const [v,id]=h.split('-'); if(!NAV.some(n=>n[0]===v)&&v!=='signal') return false;
+  const [v,id,sub]=h.split('-'); if(v==='signal') S.sigTab=sub==='inst'?'inst':'gate'; if(!NAV.some(n=>n[0]===v)&&v!=='signal') return false;
   S.view=v; if(id){ if(v==='health'&&S.me.companies.includes(id)){S.sel=id; S.scope='all';} if(v==='tech') S.tech.id=id; if(v==='signal') S.sigId=id; }
   if(v==='signal'&&!S.sigId) S.view='watch';
   return true;
@@ -1337,6 +1600,7 @@ try{ const m=JSON.parse(localStorage.getItem('compass-me')||'null'); if(m&&m.com
 try{ S.briefs=JSON.parse(localStorage.getItem('compass-briefs')||'{}')||{}; }catch(e){}
 try{ S.cache=JSON.parse(localStorage.getItem('compass-cache')||'{}')||{}; }catch(e){}
 try{ S.market=JSON.parse(localStorage.getItem('compass-market')||'null'); }catch(e){}
+try{ S.instMkt=JSON.parse(localStorage.getItem('compass-instmkt')||'null'); }catch(e){}
 if(!S.me.companies.includes(S.sel)) S.sel=S.me.companies[0];
 readHash();
 render();
