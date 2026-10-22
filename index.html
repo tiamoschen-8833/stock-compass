@@ -532,7 +532,7 @@ function paintBusy(){ const el=$('#busy'); if(!el||!S.busy) return; el.querySele
 
 /* ---------- 共用片段 ---------- */
 function dayRange(c){
-  const px=c.px||[], d=px.at(-1), p=px.at(-2); if(!d) return '';
+  const px=c.px||[], d=px.at(-1), p=px.at(-2); if(!d||!d[0]||d[4]==null) return '';
   const [dt,o,hi,lo,cl]=d, pc=p?.[4], chg=pc?cl/pc-1:null, k=v=>pc?cls(v-pc):'';
   const pos=hi>lo?(cl-lo)/(hi-lo)*100:50;
   return `<div class="dayr" title="${esc(dt)} 盤後資料（開盤 ${nf(o,2)}）">
@@ -568,9 +568,10 @@ function viewHealth(){
   const c=co(S.sel), M=analyze(S.sel); if(!M) return h+`<div class="empty"><b>${esc(nameOf(S.sel))} 尚無財報資料</b>${onPages?'請按「更新此公司」下載財報（約 10 秒）。':'請在 Claude 桌面 App 開啟本頁後按「更新此公司」。'}<div style="margin-top:12px"><button class="btn pri" data-act="updOne">↻ 更新此公司</button></div></div>`;
   const watched=S.me.watch.includes(S.sel), g=groupOf(S.sel);
   const upd=c.upd?new Date(c.upd).toLocaleString('zh-TW',{hour12:false}):`${DATA.asof}（內建快照）`;
+  const pxu=c.pxUpd&&(!c.upd||c.pxUpd>c.upd)?`｜股價更新 ${new Date(c.pxUpd).toLocaleString('zh-TW',{hour12:false,month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}`:'';
   h+=`<div class="hero"><div><div class="eyebrow">${c.m==='tpex'?'上櫃公司':'上市公司'}｜${esc(c.i)}${g?'｜'+esc(g):''}</div>
     <div class="hero-name"><h2>${esc(c.n)}<span class="code">${S.sel}</span></h2>${dayRange(c)}</div>
-    <div class="meta"><span>資料期間 <b>${M.period}</b></span><span>收盤 <b class="num">${nf(M.price,2)}</b> <span class="${cls(M.chg)} num">${pct(M.chg,true,2)}</span>（${M.pxDate}）</span><span>最後更新 <b>${upd}</b></span><span>來源 <b>FinMind 標準化財報</b>｜金額單位：億元</span></div>
+    <div class="meta"><span>資料期間 <b>${M.period}</b></span><span>收盤 <b class="num">${nf(M.price,2)}</b> <span class="${cls(M.chg)} num">${pct(M.chg,true,2)}</span>（${M.pxDate}）</span><span>最後更新 <b>${upd}</b>${pxu}</span><span>來源 <b>FinMind 標準化財報</b>｜金額單位：億元</span></div>
     ${M.fixed.includes(M.L)?`<div class="banner info" style="margin:10px 0 0">資料源 ${qLabel(M.L)} 的金額欄位為「年初至今累計值」，系統已依月營收自動換算為單季，累計比較改用同口徑相加，避免把累計數和去年單季直接相比。</div>`:''}
   </div><div class="score">${ringSvg(M.score)}<div class="acts">
     <button class="btn ${watched?'pri':''}" data-act="watch" data-id="${S.sel}">${watched?'★ 追蹤中':'☆ 加入追蹤'}</button>
@@ -784,14 +785,41 @@ async function ghRun(write){
       }
     }catch(e){ st={...st,ok:false,at:Date.now(),err:e.message||String(e)}; if(write) toast('個人清單同步失敗：'+st.err,6000); }
     ghSetState(st); render();
-    fetchMissing();
+    Promise.resolve(fetchMissing()).then(autoPrices);
   })();
   try{ await ghBusy; } finally { ghBusy=null; if(ghAgain){ ghAgain=false; ghRun(true); } }
 }
 // 其他裝置加入、這台還沒有財報資料的公司：自動下載（網頁版直接向 FinMind 取數）
 let fetchedMissing=new Set();
 function fetchMissing(){ if(!AUTO||S.busy) return; if(fmToken()&&!fetchMissing.withKey){ fetchMissing.withKey=true; fetchedMissing=new Set(); } const ids=S.me.companies.filter(id=>!co(id)&&!fetchedMissing.has(id)); if(!ids.length) return;
-  ids.forEach(id=>fetchedMissing.add(id)); runUpdate(ids,'下載其他裝置加入的公司'); }
+  ids.forEach(id=>fetchedMissing.add(id)); return runUpdate(ids,'下載其他裝置加入的公司'); }
+// 每天自動更新「追蹤中個股」的最新日價格（每檔 1 次查詢）：開盤日第一次打開、以及收盤後（16:00 起）再補一次
+const tpeNow=()=>new Date(Date.now()+8*3600e3);
+let pxRunning=false;
+async function autoPrices(){
+  if(!AUTO||pxRunning||S.busy) return;
+  const t=tpeNow(), today=t.toISOString().slice(0,10), slot=today+(t.getUTCHours()>=16?'-pm':'-am');
+  let last=''; try{ last=LS.getItem('compass-pxslot')||''; }catch(e){}
+  if(last===slot||(last===today+'-pm'&&slot.endsWith('-am'))) return;
+  const ids=S.me.watch.filter(id=>S.me.companies.includes(id)&&co(id)); if(!ids.length) return;
+  pxRunning=true; let n=0, fail=null;
+  const start=dstr(new Date(Date.now()-14*864e5));
+  for(const id of ids){
+    try{
+      const rows=(await bget(`dataset=TaiwanStockPrice&data_id=${id}&start_date=${start}`)).filter(x=>x.date&&x.close!=null).map(x=>[x.date,x.open,x.max,x.min,x.close,Math.round(x.Trading_Volume/1000)]);
+      if(!rows.length) continue;
+      const c=JSON.parse(JSON.stringify(co(id))), m=new Map(c.px.map(r=>[r[0],r]));
+      const before=c.px.at(-1)?.[0]; for(const r of rows) m.set(r[0],r);
+      c.px=[...m.values()].sort((a,b)=>a[0]<b[0]?-1:1).slice(-260); c.pxUpd=Date.now();
+      if(c.px.at(-1)[0]!==before||rows.length) { S.cache[id]=c; n++;
+        try{ const all=JSON.parse(LS.getItem('compass-cache')||'{}'); all[id]=c; LS.setItem('compass-cache',JSON.stringify(all)); }catch(e){} }
+    }catch(e){ fail=e; break; }
+  }
+  pxRunning=false; memo.clear();
+  if(!fail){ try{ LS.setItem('compass-pxslot',slot); }catch(e){} }
+  if(n){ render(); toast(`已更新 ${n} 檔追蹤個股的最新股價`+(fail?'（部分未完成）':'')); }
+  else if(fail) toast('最新股價：'+hostError(fail),6000);
+}
 function syncPill(){
   if(!onPages) return '<span class="pill ok">清單存在此瀏覽器</span>';
   const st=ghState();
@@ -799,7 +827,7 @@ function syncPill(){
   if(st&&st.ok===false) return `<button class="pill wait" data-act="ghSetup" title="${esc(st.err)}">同步失敗</button>`;
   return '<span class="pill ok">跨裝置已同步</span>';
 }
-if(AUTO) document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&Date.now()-ghLastPull>20000) ghRun(false); });
+if(AUTO) document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ if(Date.now()-ghLastPull>20000) ghRun(false); else autoPrices(); } });
 let SIG_REMOTE=null;
 async function loadRemoteSignals(){ if(!onPages) return; try{ const r=await fetch((ENV==='test'?'../':'')+'signals.json?t='+Date.now(),{cache:'no-store'}); if(r.ok){ SIG_REMOTE=await r.json(); if(S.view==='watch') render(); } }catch(e){} }
 function notifyPanel(){
