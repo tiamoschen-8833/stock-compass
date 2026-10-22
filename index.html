@@ -245,7 +245,7 @@ td.best{color:var(--good);font-weight:700}
   <aside class="side">
     <div class="brand"><div class="mark">財</div><div><b>財報羅盤</b><small>台股選股學習系統</small></div></div>
     <nav class="nav" id="nav"></nav>
-    <div class="foot"><div class="who" id="who">本機模式</div><div id="whoNote">資料僅供學習研究</div></div>
+    <div class="foot"><div class="who" id="who">本機模式</div><div id="whoNote">資料僅供學習研究</div><button class="btn sm" id="fmBtn" data-act="fmSetup" style="margin-top:8px">資料金鑰設定</button></div>
   </aside>
   <main class="main" id="main"></main>
 </div>
@@ -257,7 +257,7 @@ const ENV = 'prod';   // 測試版會改成 'test'：清單同步到 watchlist-t
 const LS = (()=>{ let ls; try{ ls=window.localStorage; }catch(e){ ls=null; }
   const mem={}; const base=ls||{getItem:k=>k in mem?mem[k]:null,setItem:(k,v)=>{mem[k]=String(v)},removeItem:k=>{delete mem[k]}};
   if(ENV!=='test') return base;
-  const P='test:', FB=['compass-gh','compass-me','compass-cache','compass-market','compass-instmkt','compass-view','compass-briefs'];
+  const P='test:', FB=['compass-gh','compass-fm','compass-me','compass-cache','compass-market','compass-instmkt','compass-view','compass-briefs'];
   return { getItem:k=>{ const v=base.getItem(P+k); return v!=null?v:(FB.includes(k)&&base.getItem(P+'nofb:'+k)==null?base.getItem(k):null); },
     setItem:(k,v)=>base.setItem(P+k,v), removeItem:k=>{ base.removeItem(P+k); base.setItem(P+'nofb:'+k,'1'); } };
 })();
@@ -422,14 +422,18 @@ const canWrite = () => S.mode!=='db' || S.isOwner || S.approved;
 
 /* ---------- 瀏覽器資料更新（Claude 桌面 App） ---------- */
 let tabId=null;
+function fmToken(){ if(typeof window!=='undefined'&&window.__FMTOKEN) return window.__FMTOKEN; try{ return LS.getItem('compass-fm')||''; }catch(e){ return ''; } }
 async function bget(params){
-  const url=FM+params; let r;
+  const tok=fmToken(), url=FM+params+(tok?'&token='+encodeURIComponent(tok):''); let r;
   if(S.direct!==false){
     try{ const res=await fetch(url); const j=await res.json(); S.direct=true;
-      if(j.status!==200) throw {code:'finmind', message:j.msg||'FinMind 回傳錯誤'}; return j.data; }
-    catch(e){ if(e.code==='finmind') throw e; if(S.direct) throw {code:'no_net', message:e.message}; S.direct=false; }
+      if(j.status!==200) throw {code:j.status===402?'fm_limit':j.status===401||j.status===403?'fm_token':'finmind', message:j.msg||'FinMind 回傳錯誤'}; return j.data; }
+    catch(e){ if(e.code) throw e;
+      if(S.direct||!S.mcp) throw {code:'fm_fail', message:e.message};   // 網頁版：額度用完時 FinMind 的回應會被瀏覽器擋下，看起來像連線失敗
+      S.direct=false; }
   }
   if(!S.mcp) throw {code:'no_host'};
+  if(tok) throw {code:'fm_fail'};
   if(!tabId){ r=await S.mcp.callTool(HOST,'preview_start',{url},{cache:false});
     const t=(r.content||[]).map(b=>b.text||'').join(' '); const m=t.match(/tabId\s+([\w-]+)/); tabId=m?m[1]:null; }
   else await S.mcp.callTool(HOST,'navigate',{url,tabId},{cache:false});
@@ -471,7 +475,9 @@ async function saveCache(id,data){
 }
 function hostError(e){
   const c=e?.code;
-  if(c==='no_net') return '無法連線到 FinMind，請確認網路連線後再試一次。';
+  if(c==='no_net'||c==='fm_fail') return fmToken()?'暫時無法向 FinMind 取得資料：可能是本小時 600 次額度已用完（與其他網站共用），或網路不穩，請稍後再試。':'暫時無法向 FinMind 取得資料：最常見原因是未登入的免費額度已用完（依網路計次）。設定 FinMind 金鑰可提高到每小時 600 次，或約一小時後再試。';
+  if(c==='fm_limit') return 'FinMind 本小時額度已用完'+(fmToken()?'（每小時 600 次，與其他網站共用）':'，設定 FinMind 金鑰可提高額度')+'，請約一小時後再試。';
+  if(c==='fm_token') return 'FinMind 金鑰無效或已更換，請到「資料金鑰設定」重新貼上。';
   if(c==='no_host'||c==='server_not_connected'||c==='not_granted'||c==='capability_disabled') return '即時更新需要在 Claude 桌面 App 中開啟本頁（由內建瀏覽器向 FinMind 取數）。目前先顯示已保存的資料。';
   if(c==='not_in_manifest'||c==='approval_required') return '需要允許本頁使用 Claude 內建瀏覽器，請在權限提示中按「允許」後再試一次。';
   if(c==='cancelled') return '已取消瀏覽器動作，資料未更新。';
@@ -541,7 +547,7 @@ function viewHealth(){
     <div class="field"><label for="sel">分析公司</label><select id="sel" data-chg="sel">${companyOptions(ids,S.sel)}</select></div>
     <button class="btn" data-act="updAll">↻ 更新全部公司</button><button class="btn" data-act="groups">管理類股群組</button></div>`;
   if(!ids.length) return h+`<div class="empty">☆<b>這個範圍沒有公司</b>按「自動加入公司」輸入代號或名稱即可加入。</div>`;
-  const c=co(S.sel), M=analyze(S.sel); if(!M) return h+`<div class="empty"><b>${esc(nameOf(S.sel))} 尚無財報資料</b>請在 Claude 桌面 App 開啟本頁後按「更新此公司」。<div style="margin-top:12px"><button class="btn pri" data-act="updOne">↻ 更新此公司</button></div></div>`;
+  const c=co(S.sel), M=analyze(S.sel); if(!M) return h+`<div class="empty"><b>${esc(nameOf(S.sel))} 尚無財報資料</b>${onPages?'請按「更新此公司」下載財報（約 10 秒）。':'請在 Claude 桌面 App 開啟本頁後按「更新此公司」。'}<div style="margin-top:12px"><button class="btn pri" data-act="updOne">↻ 更新此公司</button></div></div>`;
   const watched=S.me.watch.includes(S.sel), g=groupOf(S.sel);
   const upd=c.upd?new Date(c.upd).toLocaleString('zh-TW',{hour12:false}):`${DATA.asof}（內建快照）`;
   h+=`<div class="hero"><div><div class="eyebrow">${c.m==='tpex'?'上櫃公司':'上市公司'}｜${esc(c.i)}${g?'｜'+esc(g):''}</div>
@@ -766,7 +772,7 @@ async function ghRun(write){
 }
 // 其他裝置加入、這台還沒有財報資料的公司：自動下載（網頁版直接向 FinMind 取數）
 let fetchedMissing=new Set();
-function fetchMissing(){ if(!AUTO||S.busy) return; const ids=S.me.companies.filter(id=>!co(id)&&!fetchedMissing.has(id)); if(!ids.length) return;
+function fetchMissing(){ if(!AUTO||S.busy) return; if(fmToken()&&!fetchMissing.withKey){ fetchMissing.withKey=true; fetchedMissing=new Set(); } const ids=S.me.companies.filter(id=>!co(id)&&!fetchedMissing.has(id)); if(!ids.length) return;
   ids.forEach(id=>fetchedMissing.add(id)); runUpdate(ids,'下載其他裝置加入的公司'); }
 function syncPill(){
   if(!onPages) return '<span class="pill ok">清單存在此瀏覽器</span>';
@@ -788,6 +794,16 @@ function notifyPanel(){
       <div>最近一次自動檢查<b>${R?esc(R.date)+(R.complete?'':'（資料未完整）'):'尚無紀錄'}</b></div>
       <div>可評估進場<b>${R?.stocks?R.stocks.filter(x=>x.status==='可評估進場').length+' 檔／共 '+R.stocks.length+' 檔':'—'}</b></div></div>
     <p class="cap" style="margin:8px 0 0">每個交易日收盤後由 GitHub 自動計算四道閘門，再由 Claude 推播摘要到您的手機。${tok?'':'需先完成一次同步設定，系統才會知道您追蹤哪些個股。'}</p></div>`;
+}
+function fmModal(){
+  const tok=fmToken();
+  modal(`<button class="btn sm ghost x" data-act="close">關閉</button><h3>FinMind 資料金鑰</h3>
+    <p style="font-size:13.5px;color:var(--muted);margin:4px 0 10px">設定後，這台裝置向 FinMind 下載財報、股價與法人資料時會用您的會員額度（每小時 600 次，依帳號計算）。金鑰只儲存在這個瀏覽器，不會放進網站程式碼，也不會同步到其他裝置；每台裝置各貼一次。</p>
+    <ol style="font-size:13.5px;padding-left:20px;margin:0 0 12px;display:grid;gap:4px">
+      <li>登入 <a href="https://finmindtrade.com/analysis/#/account/user" target="_blank" rel="noopener">FinMind 會員頁</a></li>
+      <li>在「api token 金鑰」按右邊的「複製」</li><li>貼到下方，按「儲存」</li></ol>
+    <div class="field"><label for="fmTok">FinMind 金鑰</label><input id="fmTok" type="password" autocomplete="off" placeholder="${tok?'已設定（重新貼上可更換）':'eyJ…'}"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">${tok?'<button class="btn danger" data-act="fmRemove">移除金鑰</button>':''}<button class="btn pri" data-act="fmSave">儲存</button></div>`);
 }
 function ghModal(){
   const tok=ghToken();
@@ -1607,10 +1623,13 @@ const A={
   watch:d=>{ const w=S.me.watch, i=w.indexOf(d.id); i<0?w.push(d.id):w.splice(i,1); persist(); render(); toast(i<0?'已加入追蹤':'已取消追蹤'); },
   delCo:d=>modal(`<h3>刪除 ${esc(nameOf(d.id))}？</h3><p>會從你的公司清單、群組與追蹤中移除，共用的財報資料不受影響。</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-act="close">取消</button><button class="btn pri" data-act="delYes" data-id="${d.id}">刪除</button></div>`),
   delYes:d=>{ const id=d.id; S.me.companies=S.me.companies.filter(x=>x!==id); S.me.watch=S.me.watch.filter(x=>x!==id); for(const g in S.me.groups) S.me.groups[g]=S.me.groups[g].filter(x=>x!==id); persist(); closeModal(); S.sel=S.me.companies[0]; render(); toast('已刪除'); },
-  updAll:()=>runUpdate(scopeIds(),'更新全部公司'), updOne:()=>runUpdate([S.sel],'更新 '+nameOf(S.sel)), updMarket:()=>updateMarket(),
+  updAll:()=>{ const all=scopeIds(), ids=all.filter(id=>!(S.cache[id]?.upd>Date.now()-6*3600e3)); if(!ids.length){ toast('全部公司 6 小時內都已更新過，不需重複下載'); return; } if(ids.length<all.length) toast(`略過 ${all.length-ids.length} 家 6 小時內已更新的公司`); runUpdate(ids,'更新全部公司'); }, updOne:()=>runUpdate([S.sel],'更新 '+nameOf(S.sel)), updMarket:()=>updateMarket(),
   open:d=>{S.sel=d.id; S.scope='all'; A.nav({v:'health'});}, goTech:d=>{S.tech.id=d.id; A.nav({v:'tech'});},
   days:d=>{S.tech.days=+d.v; render();},
-  ghSetup:()=>ghModal(),
+  ghSetup:()=>ghModal(), fmSetup:()=>fmModal(),
+  fmSave:async()=>{ const v=$('#fmTok').value.trim(); if(!v){ closeModal(); return; } if(!/^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(v)){ toast('金鑰格式不正確，請從 FinMind 會員頁按「複製」後貼上'); return; }
+    try{ LS.setItem('compass-fm',v); }catch(e){ toast('此瀏覽器無法儲存金鑰'); return; } S.direct=null; closeModal(); renderFoot(); toast('已儲存 FinMind 金鑰，之後下載資料會使用會員額度'); fetchMissing(); },
+  fmRemove:()=>{ try{ LS.removeItem('compass-fm'); }catch(e){} S.direct=null; closeModal(); renderFoot(); toast('已移除 FinMind 金鑰'); },
   ghSave:()=>{ const v=$('#ghTok').value.trim(); if(v){ if(!/^(github_pat_|ghp_)/.test(v)){ toast('權杖格式不正確，應以 github_pat_ 開頭'); return; } try{ LS.setItem('compass-gh',v); }catch(e){ toast('此瀏覽器無法儲存權杖'); return; } } closeModal(); toast('同步中…'); ghRun(true); },
   ghNow:()=>{ closeModal(); toast('同步中…'); ghRun(true); },
   ghRemove:()=>{ try{ LS.removeItem('compass-gh'); LS.removeItem('compass-gh-state'); }catch(e){} closeModal(); render(); toast('已移除權杖，此裝置的變更不再上傳'); },
@@ -1665,7 +1684,9 @@ function readHash(){
 }
 window.addEventListener('hashchange',()=>{ if(readHash()){ closeModal(); render(); } });
 window.addEventListener('popstate',()=>{ if(readHash()){ closeModal(); render(); } });
+function renderFoot(){ const b=$('#fmBtn'); if(b) b.textContent=fmToken()?'✓ FinMind 金鑰已設定':'資料金鑰設定'; }
 function render(push){
+  renderFoot();
   $('#nav').innerHTML=NAV.filter(([v])=>v!=='admin'||S.canEdit).map(([v,ic,t])=>`<button data-act="nav" data-v="${v}" ${S.view===v||(v==='watch'&&S.view==='signal')?'aria-current="page"':''}><span class="ic">${ic}</span>${t}${v==='etf'?'<span class="tag">V09</span>':''}</button>`).join('');
   const V={health:viewHealth,watch:viewWatch,signal:viewSignal,peer:viewPeer,tech:viewTech,etf:viewEtf,brief:viewBrief,admin:viewAdmin}[S.view]||viewHealth;
   let pre='';
