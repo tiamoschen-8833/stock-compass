@@ -25,6 +25,8 @@ jobs:
           node-version: 20
       - run: npm i --no-save --no-audit --no-fund jsdom@24.1.3
       - run: node scripts/signals.mjs ${{ inputs.force && '--force' || '' }}
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
       - name: 提交結果
         run: |
           if [ -z "$(git status --porcelain signals.json)" ]; then echo "沒有變更"; exit 0; fi

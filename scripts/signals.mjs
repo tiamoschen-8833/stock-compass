@@ -12,7 +12,7 @@ if (!wl.watch?.length) { console.log('追蹤清單為空'); }
 const html = fs.readFileSync('index.html', 'utf8');
 const dom = new JSDOM(html, {
   runScripts: 'dangerously', url: 'https://tiamoschen-8833.github.io/stock-compass/',
-  beforeParse(w) { w.fetch = fetch; w.scrollTo = () => {}; }
+  beforeParse(w) { w.fetch = fetch; w.scrollTo = () => {}; w.__FMTOKEN = process.env.FINMIND_TOKEN || ''; }
 });
 const w = dom.window;
 w.__WL = wl;
