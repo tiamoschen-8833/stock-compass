@@ -215,6 +215,20 @@ td.best{color:var(--good);font-weight:700}
 .ctip-h{font-family:var(--f-num);font-weight:600;margin-bottom:4px;color:var(--accent)}
 .ctip div:not(.ctip-h){display:flex;justify-content:space-between;gap:14px;line-height:1.7}
 .ctip span{color:var(--muted)}
+.mkt{display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:18px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:16px}
+.mkt-h{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.mkt-h h3{margin:0;font-family:var(--f-display);font-size:18px}
+.mkt-close{font-family:var(--f-num);font-size:30px;font-weight:600;line-height:1.15;margin-top:6px;font-variant-numeric:tabular-nums}
+.mkt-chg{font-family:var(--f-num);font-size:14px;font-weight:600}
+.mkt-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
+.mkt-grid div{background:var(--sunk);border:1px solid var(--line);border-radius:9px;padding:7px 10px}
+.mkt-grid small{display:block;font-size:11.5px;color:var(--muted)}
+.mkt-grid b{font-family:var(--f-num);font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+.mkt-chart .chips{justify-content:flex-end}
+.mkt-inst small:last-child{margin-top:2px;font-size:11px}
+.mkt-chart svg text{font-size:11px;fill:var(--muted);font-family:var(--f-num)}
+.mkt-foot{font-size:12px;color:var(--muted);margin-top:8px}
+@media (max-width:860px){.mkt{grid-template-columns:minmax(0,1fr)}}
 .ctip b{font-family:var(--f-num);font-weight:600;font-variant-numeric:tabular-nums}
 .bt-list{display:grid;gap:12px}
 .bt-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.4fr);gap:16px;margin-top:10px}
@@ -230,7 +244,7 @@ td.best{color:var(--good);font-weight:700}
 @media (max-width:900px){.bt-grid,.bt-foot{grid-template-columns:1fr}}
 .detail{margin-top:14px}
 @media (max-width:900px){
-  .app{grid-template-columns:1fr}
+  .app{grid-template-columns:minmax(0,1fr)}
   .side{position:sticky;top:env(safe-area-inset-top,0px);height:auto;z-index:20;padding-block:10px;padding-right:max(16px,env(safe-area-inset-right,0px));gap:8px}
   body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--side)}
   .brand .mark{width:30px;height:30px;font-size:14px} .brand b{font-size:16px} .brand small{display:none}
@@ -555,10 +569,89 @@ function ringSvg(score){ const r=40,c=2*Math.PI*r, col=score>=80?'var(--good)':s
   return `<div class="ring"><svg width="96" height="96" viewBox="0 0 96 96"><circle cx="48" cy="48" r="${r}" fill="none" stroke="var(--sunk)" stroke-width="8"/><circle cx="48" cy="48" r="${r}" fill="none" stroke="${col}" stroke-width="8" stroke-linecap="round" stroke-dasharray="${c*score/100} ${c}"/></svg><div class="v"><div><b>${score}</b><small>/ 100</small></div></div></div>`; }
 
 /* ---------- 視圖：財報健檢 ---------- */
+/* ---------- 大盤走勢（財報健檢首頁） ---------- */
+let MKT=null;
+function marketPanel(){
+  const T=taiex(); if(!T||T.length<2) return '';
+  const days=S.mktDays||60, n=T.length, t=T[n-1], p=T[n-2], ch=t[4]-p[4], cr=ch/p[4];
+  const seg=T.slice(-days), cl=T.map(x=>x[4]), start=n-seg.length, ma20=seg.map((_,i)=>MA(cl,20,start+i));
+  const gap=t[1]-p[4];
+  const narrow=(window.innerWidth||1200)<600, IM=new Map((S.instMkt?.rows||[]).map(r=>[r[0],r])), hasI=seg.some(x=>IM.has(x[0])), IH=hasI?(narrow?64:60):0;
+  const W=narrow?400:760,H=(narrow?330:300)+(hasI?IH+22:0),L=narrow?46:52,R=10,TP=10,VH=narrow?60:56,PH=(narrow?330:300)-TP-24-VH-22,VT=TP+PH+22,IT=VT+VH+22;
+  const vals=[...seg.map(x=>x[2]),...seg.map(x=>x[3]),...ma20.filter(Boolean)], hi=Math.max(...vals), lo=Math.min(...vals), pad=(hi-lo)*.06||1;
+  const top=hi+pad, bot=lo-pad, Y=v=>TP+(top-v)/(top-bot)*PH, X=i=>L+(seg.length<2?0:i/(seg.length-1)*(W-L-R));
+  MKT={seg,X,Y,W,H,L,R,TP,PH,IM,prev:start>0?T[start-1][4]:null};
+  const vmax=Math.max(...seg.map(x=>x[5]||0))||1, bw=(W-L-R)/Math.max(1,seg.length), vw=Math.max(1,bw*.62);
+  const vol=seg.map((x,i)=>{ const pc=i>0?seg[i-1][4]:MKT.prev, up=pc==null?x[4]>=x[1]:x[4]>=pc, vh=(x[5]||0)/vmax*VH;
+    return `<rect x="${(X(i)-vw/2).toFixed(1)}" y="${(VT+VH-vh).toFixed(1)}" width="${vw.toFixed(1)}" height="${vh.toFixed(1)}" fill="${up?'var(--up)':'var(--down)'}" opacity=".6"/>`; }).join('');
+  const v20=MA(T.map(x=>x[5]),20,n-1);
+  const isum=r=>r?r[1]+r[2]+r[3]+r[4]+r[5]:null;
+  function instCells(){
+    const R=S.instMkt?.rows||[]; if(!R.length) return `<div class="mkt-foot">三大法人：尚無資料，下次自動更新時會下載。</div>`;
+    const r=IM.get(t[0])||R.at(-1), k=R.findIndex(x=>x[0]===r[0]), last5=R.slice(Math.max(0,k-4),k+1);
+    const f=v=>`<b class="${cls(v)}">${v>=0?'+':''}${nf(v,1)}</b>`, s5=j=>last5.reduce((a,x)=>a+(j==='d'?x[3]+x[4]+x[5]:j==='t'?isum(x):x[j]),0);
+    const cell=(name,v,v5)=>`<div><small>${name}</small>${f(v)}<small>近 5 日 ${v5>=0?'+':''}${nf(v5,1)}</small></div>`;
+    let streak=0,sg=0; for(let j=k;j>=0;j--){ const g=Math.sign(R[j][1]); if(!g) break; if(!sg) sg=g; if(g!==sg) break; streak++; }
+    return `<div class="mkt-h" style="margin-top:14px"><h3 style="font-size:15px">三大法人買賣超</h3><span class="eyebrow" style="margin:0">${r[0].replace(/-/g,'/')}｜億元</span></div>
+      <div class="mkt-grid mkt-inst">${cell('外資',r[1],s5(1))}${cell('投信',r[2],s5(2))}${cell('自營商',r[3]+r[4]+r[5],s5('d'))}${cell('合計',isum(r),s5('t'))}</div>
+      <div class="mkt-foot">外資連續${sg>0?'買超':'賣超'} ${streak} 日${r[0]!==t[0]?'｜法人資料日期與指數不同，以標示日期為準':''}</div>`; }
+  function instPane(){ if(!hasI) return '';
+    const amax=Math.max(1,...seg.map(x=>Math.abs(isum(IM.get(x[0]))||0))), mid=IT+IH/2;
+    const bars=seg.map((x,i)=>{ const v=isum(IM.get(x[0])); if(v==null) return ''; const hh=Math.abs(v)/amax*(IH/2);
+      return `<rect x="${(X(i)-vw/2).toFixed(1)}" y="${(v>=0?mid-hh:mid).toFixed(1)}" width="${vw.toFixed(1)}" height="${Math.max(.5,hh).toFixed(1)}" fill="${v>=0?'var(--up)':'var(--down)'}" opacity=".75"/>`; }).join('');
+    return `<g class="grid"><line x1="${L}" x2="${W-R}" y1="${mid}" y2="${mid}"/><text x="${L-6}" y="${IT+8}" text-anchor="end">+${nf(amax,0)}</text><text x="${L-6}" y="${IT+IH}" text-anchor="end">-${nf(amax,0)}</text></g>
+      <text x="${L}" y="${IT-6}">三大法人合計買賣超（億元）　紅：買超　綠：賣超</text>${bars}`; }
+  const up=seg.at(-1)[4]>=seg[0][4], col=up?'var(--up)':'var(--down)';
+  const pts=seg.map((x,i)=>`${X(i).toFixed(1)},${Y(x[4]).toFixed(1)}`).join(' ');
+  let g=`<g class="grid">`; for(let i=0;i<=4;i++){ const v=bot+(top-bot)*i/4, y=Y(v); g+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}"/><text x="${L-6}" y="${y+4}" text-anchor="end">${Math.round(v).toLocaleString('en-US')}</text>`; } g+='</g>';
+  const tick=[0,Math.floor((seg.length-1)/2),seg.length-1].map(i=>`<text x="${Math.min(W-R-18,Math.max(L+18,X(i)))}" y="${H-4}" text-anchor="middle">${seg[i][0].slice(5).replace('-','/')}</text>`).join('');
+  const maPts=ma20.map((v,i)=>v==null?null:`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).filter(Boolean).join(' ');
+  const svg=`<div class="cwrap"><svg class="chart" id="mchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="加權指數近 ${seg.length} 個交易日收盤走勢，滑鼠移上可看當日開高低收">${g}
+    <polygon points="${X(0)},${TP+PH} ${pts} ${X(seg.length-1)},${TP+PH}" fill="${col}" opacity=".08"/>
+    ${maPts?`<polyline points="${maPts}" fill="none" stroke="var(--ma20)" stroke-width="1.4" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>`:''}
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <circle cx="${X(seg.length-1)}" cy="${Y(seg.at(-1)[4])}" r="3.5" fill="${col}"/>${tick}
+    <g class="grid"><line x1="${L}" x2="${W-R}" y1="${VT+VH}" y2="${VT+VH}"/><text x="${L-6}" y="${VT+8}" text-anchor="end">${nf(vmax,0)}</text></g>
+    <text x="${L}" y="${VT-6}">成交值（億元）　紅：上漲日　綠：下跌日</text>${vol}
+    ${instPane()}
+    ${v20?`<line x1="${L}" x2="${W-R}" y1="${(VT+VH-v20/vmax*VH).toFixed(1)}" y2="${(VT+VH-v20/vmax*VH).toFixed(1)}" stroke="var(--ma20)" stroke-dasharray="4 3" stroke-width="1"/>`:''}
+    <g id="mcross" style="display:none;pointer-events:none"><line id="mvline" y1="${TP}" y2="${hasI?IT+IH:VT+VH}" stroke="var(--muted)" stroke-dasharray="3 3"/><circle id="mdot" r="4" fill="var(--surface)" stroke="${col}" stroke-width="2"/></g></svg>
+    <div class="ctip" id="mtip" hidden></div></div>`;
+  const tpe=tpeNow(), todayStr=tpe.toISOString().slice(0,10), intraday=t[0]!==todayStr&&tpe.getUTCDay()>=1&&tpe.getUTCDay()<=5&&tpe.getUTCHours()<16;
+  return `<section class="mkt" aria-label="大盤走勢"><div>
+      <div class="mkt-h"><h3>加權指數</h3><span class="eyebrow" style="margin:0">${t[0].replace(/-/g,'/')} 盤後</span></div>
+      <div class="mkt-close ${cls(ch)}">${nf(t[4],2)}</div>
+      <div class="mkt-chg ${cls(ch)}">${ch>=0?'▲':'▼'} ${nf(Math.abs(ch),2)} 點（${pct(cr,true,2)}）</div>
+      <div class="mkt-grid">
+        <div><small>開盤</small><b class="${cls(gap)}">${nf(t[1],2)}</b></div>
+        <div><small>收盤</small><b class="${cls(ch)}">${nf(t[4],2)}</b></div>
+        <div><small>最高</small><b class="${cls(t[2]-p[4])}">${nf(t[2],2)}</b></div>
+        <div><small>最低</small><b class="${cls(t[3]-p[4])}">${nf(t[3],2)}</b></div>
+        <div><small>開盤跳空</small><b class="${cls(gap)}">${gap>=0?'+':''}${nf(gap,2)}</b></div>
+        <div><small>成交值</small><b>${nf(t[5],0)} 億</b></div></div>
+      ${instCells()}
+      <div class="mkt-foot">昨收 ${nf(p[4],2)}｜20 日均量 ${nf(v20,0)} 億${intraday?'｜目前為盤中，今日收盤約 16:00 後更新':''}</div></div>
+    <div class="mkt-chart"><div class="chips">${[[20,'1 個月'],[60,'3 個月'],[120,'6 個月']].map(([d,l])=>`<button class="chip" aria-pressed="${days===d}" data-act="mktDays" data-v="${d}">${l}</button>`).join('')}</div>
+      ${svg}<div class="mkt-foot">實線：收盤走勢　虛線：20 日均線／20 日均量　資料：FinMind（證交所盤後）</div></div></section>`;
+}
+function mHover(e){
+  const svg=$('#mchart'); if(!svg||!MKT) return; const C=MKT, r=svg.getBoundingClientRect();
+  const xv=(e.clientX-r.left)/r.width*C.W; const n=C.seg.length; let i=Math.round((xv-C.L)/((C.W-C.L-C.R)/Math.max(1,n-1)));
+  const tip=$('#mtip'), g=$('#mcross'); if(i<0||i>=n){ tip.hidden=true; g.style.display='none'; return; }
+  const [d,o,h,l,c,v]=C.seg[i], pc=i>0?C.seg[i-1][4]:C.prev, ch=pc?c-pc:null, x=C.X(i);
+  g.style.display=''; $('#mvline').setAttribute('x1',x); $('#mvline').setAttribute('x2',x); $('#mdot').setAttribute('cx',x); $('#mdot').setAttribute('cy',C.Y(c));
+  const row=(k,val,cl='')=>`<div><span>${k}</span><b class="${cl}">${val}</b></div>`;
+  tip.innerHTML=`<div class="ctip-h">${d.replace(/-/g,'/')}</div>${row('開盤',nf(o))}${row('最高',nf(h))}${row('最低',nf(l))}${row('收盤',nf(c),cls(ch))}${row('漲跌',ch==null?'—':(ch>0?'+':'')+nf(ch)+'（'+pct(ch/pc,true,2)+'）',cls(ch))}${row('成交值',nf(v,0)+' 億')}${(()=>{ const r=C.IM?.get(d); if(!r) return ''; const sg=x=>(x>=0?'+':'')+nf(x,1)+' 億';
+    return `<div class="ctip-h" style="margin-top:6px">三大法人</div>${row('外資',sg(r[1]),cls(r[1]))}${row('投信',sg(r[2]),cls(r[2]))}${row('自營商',sg(r[3]+r[4]+r[5]),cls(r[3]+r[4]+r[5]))}${row('合計',sg(r[1]+r[2]+r[3]+r[4]+r[5]),cls(r[1]+r[2]+r[3]+r[4]+r[5]))}`; })()}`;
+  tip.hidden=false; const wrap=svg.parentElement.getBoundingClientRect(), px=(x/C.W)*r.width, tw=tip.offsetWidth;
+  tip.style.left=(px+14+tw>wrap.width?px-14-tw:px+14)+'px'; tip.style.top='8px';
+}
+document.addEventListener('pointermove',e=>{ if(e.target.closest?.('#mchart')) mHover(e); else if($('#mtip')&&!$('#mtip').hidden){ $('#mtip').hidden=true; const g=$('#mcross'); if(g) g.style.display='none'; } });
 function viewHealth(){
   const ids=scopeIds(); if(ids.length && !ids.includes(S.sel)) S.sel=ids[0];
   const groups=Object.keys(S.me.groups);
   let h=topbar('Personal learning center','財報健檢',`<button class="btn gold" data-act="addCo">＋ 自動加入公司</button>`);
+  h+=marketPanel();
   h+=`<div class="bar">
     <div class="field"><label for="scope">查看範圍</label><select id="scope" data-chg="scope"><option value="all">全部公司（${S.me.companies.length}）</option>${groups.map(g=>`<option value="${esc(g)}" ${S.scope===g?'selected':''}>${esc(g)}（${S.me.groups[g].filter(i=>S.me.companies.includes(i)).length}）</option>`).join('')}</select></div>
     <div class="field grow"><label for="q">個股搜尋</label><input id="q" data-inp="q" placeholder="輸入代號或公司名稱" value="${esc(S.q)}"></div>
@@ -801,10 +894,21 @@ async function autoPrices(){
   const t=tpeNow(), today=t.toISOString().slice(0,10), slot=today+(t.getUTCHours()>=16?'-pm':'-am');
   let last=''; try{ last=LS.getItem('compass-pxslot')||''; }catch(e){}
   if(last===slot||(last===today+'-pm'&&slot.endsWith('-am'))) return;
-  const ids=S.me.watch.filter(id=>S.me.companies.includes(id)&&co(id)); if(!ids.length) return;
-  pxRunning=true; let n=0, fail=null;
+  const ids=S.me.watch.filter(id=>S.me.companies.includes(id)&&co(id));
+  pxRunning=true; let n=0, fail=null, mk=false;
   const start=dstr(new Date(Date.now()-14*864e5));
-  for(const id of ids){
+  try{ // 大盤（加權指數）1 次查詢
+    const rows=(await bget(`dataset=TaiwanStockPrice&data_id=TAIEX&start_date=${dstr(new Date(Date.now()-(taiex().length<130?200:14)*864e5))}`)).filter(x=>x.date&&x.close!=null).map(x=>[x.date,x.open,x.max,x.min,x.close,Math.round(x.Trading_money/1e8)]);
+    if(rows.length){ const m=new Map(taiex().map(r=>[r[0],r])); for(const r of rows) m.set(r[0],r);
+      S.market={...(S.market||{etf:DATA.etf}), taiex:[...m.values()].sort((a,b)=>a[0]<b[0]?-1:1).slice(-260), upd:Date.now()}; mk=true;
+      if(S.db){ try{ await S.db.doc('cache/market').set(S.market);}catch(e){} } else { try{ LS.setItem('compass-market',JSON.stringify(S.market)); }catch(e){} } }
+  }catch(e){ fail=e; }
+  if(!fail) try{ // 大盤三大法人 1 次查詢
+    const have=S.instMkt?.rows||[], r=await bget(`dataset=TaiwanStockTotalInstitutionalInvestors&start_date=${dstr(new Date(Date.now()-(have.length<100?190:14)*864e5))}`);
+    if(r.length){ const m=new Map(have.map(x=>[x[0],x])); for(const x of instMktSplit(r)) m.set(x[0],x);
+      S.instMkt={rows:[...m.values()].sort((a,b)=>a[0]<b[0]?-1:1).slice(-260), upd:Date.now()}; mk=true; try{ LS.setItem('compass-instmkt',JSON.stringify(S.instMkt)); }catch(e){} }
+  }catch(e){ fail=e; }
+  for(const id of fail?[]:ids){
     try{
       const rows=(await bget(`dataset=TaiwanStockPrice&data_id=${id}&start_date=${start}`)).filter(x=>x.date&&x.close!=null).map(x=>[x.date,x.open,x.max,x.min,x.close,Math.round(x.Trading_Volume/1000)]);
       if(!rows.length) continue;
@@ -817,7 +921,7 @@ async function autoPrices(){
   }
   pxRunning=false; memo.clear();
   if(!fail){ try{ LS.setItem('compass-pxslot',slot); }catch(e){} }
-  if(n){ render(); toast(`已更新 ${n} 檔追蹤個股的最新股價`+(fail?'（部分未完成）':'')); }
+  if(n||mk){ render(); toast((mk?'已更新大盤與法人':'')+(n?(mk?'與 ':'已更新 ')+`${n} 檔追蹤個股的最新股價`:'走勢')+(fail?'（部分未完成）':'')); }
   else if(fail) toast('最新股價：'+hostError(fail),6000);
 }
 function syncPill(){
@@ -1672,6 +1776,7 @@ const A={
   updAll:()=>{ const all=scopeIds(), ids=all.filter(id=>!(S.cache[id]?.upd>Date.now()-6*3600e3)); if(!ids.length){ toast('全部公司 6 小時內都已更新過，不需重複下載'); return; } if(ids.length<all.length) toast(`略過 ${all.length-ids.length} 家 6 小時內已更新的公司`); runUpdate(ids,'更新全部公司'); }, updOne:()=>runUpdate([S.sel],'更新 '+nameOf(S.sel)), updMarket:()=>updateMarket(),
   open:d=>{S.sel=d.id; S.scope='all'; A.nav({v:'health'});}, goTech:d=>{S.tech.id=d.id; A.nav({v:'tech'});},
   days:d=>{S.tech.days=+d.v; render();},
+  mktDays:d=>{S.mktDays=+d.v; try{LS.setItem('compass-mktdays',d.v)}catch(e){} render(true);},
   ghSetup:()=>ghModal(), fmSetup:()=>fmModal(),
   fmSave:async()=>{ const v=$('#fmTok').value.trim(); if(!v){ closeModal(); return; } if(!/^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(v)){ toast('金鑰格式不正確，請從 FinMind 會員頁按「複製」後貼上'); return; }
     try{ LS.setItem('compass-fm',v); }catch(e){ toast('此瀏覽器無法儲存金鑰'); return; } S.direct=null; closeModal(); renderFoot(); toast('已儲存 FinMind 金鑰，之後下載資料會使用會員額度'); fetchMissing(); },
@@ -1685,7 +1790,7 @@ const A={
   updInst:async()=>{ if(S.busy) return; const id=S.sigId;
     S.busy={label:'更新法人資料', done:0, total:1, note:'大盤三大法人'}; render();
     try{ const r=await bget(`dataset=TaiwanStockTotalInstitutionalInvestors&start_date=${dstr(new Date(Date.now()-40*864e5))}`);
-      if(r.length){ S.instMkt={rows:instMktSplit(r), upd:Date.now()}; try{ LS.setItem('compass-instmkt',JSON.stringify(S.instMkt)); }catch(e){} } }
+      if(r.length){ const m=new Map((S.instMkt?.rows||[]).map(x=>[x[0],x])); for(const x of instMktSplit(r)) m.set(x[0],x); S.instMkt={rows:[...m.values()].sort((a,b)=>a[0]<b[0]?-1:1).slice(-260), upd:Date.now()}; try{ LS.setItem('compass-instmkt',JSON.stringify(S.instMkt)); }catch(e){} } }
     catch(e){ toast('大盤法人資料：'+hostError(e),7000); }
     S.busy=null; await runUpdate([id],'更新 '+nameOf(id)); },
   updWatch:()=>runUpdate(S.me.watch.filter(id=>S.me.companies.includes(id)),'更新追蹤個股'),
@@ -1749,6 +1854,7 @@ try{ S.briefs=JSON.parse(LS.getItem('compass-briefs')||'{}')||{}; }catch(e){}
 try{ S.cache=JSON.parse(LS.getItem('compass-cache')||'{}')||{}; }catch(e){}
 try{ S.market=JSON.parse(LS.getItem('compass-market')||'null'); }catch(e){}
 try{ S.instMkt=JSON.parse(LS.getItem('compass-instmkt')||'null'); }catch(e){}
+try{ const d=+LS.getItem('compass-mktdays'); if([20,60,120].includes(d)) S.mktDays=d; }catch(e){}
 if(!S.me.companies.includes(S.sel)) S.sel=S.me.companies[0];
 readHash();
 render();
