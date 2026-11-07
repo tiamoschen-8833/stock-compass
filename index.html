@@ -574,11 +574,15 @@ function marketPanel(){
   const T=taiex(); if(!T||T.length<2) return '';
   const days=S.mktDays||60, n=T.length, t=T[n-1], p=T[n-2], ch=t[4]-p[4], cr=ch/p[4];
   const seg=T.slice(-days), cl=T.map(x=>x[4]), start=n-seg.length, ma20=seg.map((_,i)=>MA(cl,20,start+i));
-  const v20=MA(T.map(x=>x[5]),20,n-1), gap=t[1]-p[4];
-  const narrow=(window.innerWidth||1200)<600, W=narrow?400:760,H=narrow?250:230,L=narrow?46:52,R=10,TP=10,PH=H-TP-24;
+  const gap=t[1]-p[4];
+  const narrow=(window.innerWidth||1200)<600, W=narrow?400:760,H=narrow?330:300,L=narrow?46:52,R=10,TP=10,VH=narrow?60:56,PH=H-TP-24-VH-22,VT=TP+PH+22;
   const vals=[...seg.map(x=>x[2]),...seg.map(x=>x[3]),...ma20.filter(Boolean)], hi=Math.max(...vals), lo=Math.min(...vals), pad=(hi-lo)*.06||1;
   const top=hi+pad, bot=lo-pad, Y=v=>TP+(top-v)/(top-bot)*PH, X=i=>L+(seg.length<2?0:i/(seg.length-1)*(W-L-R));
   MKT={seg,X,Y,W,H,L,R,TP,PH,prev:start>0?T[start-1][4]:null};
+  const vmax=Math.max(...seg.map(x=>x[5]||0))||1, bw=(W-L-R)/Math.max(1,seg.length), vw=Math.max(1,bw*.62);
+  const vol=seg.map((x,i)=>{ const pc=i>0?seg[i-1][4]:MKT.prev, up=pc==null?x[4]>=x[1]:x[4]>=pc, vh=(x[5]||0)/vmax*VH;
+    return `<rect x="${(X(i)-vw/2).toFixed(1)}" y="${(VT+VH-vh).toFixed(1)}" width="${vw.toFixed(1)}" height="${vh.toFixed(1)}" fill="${up?'var(--up)':'var(--down)'}" opacity=".6"/>`; }).join('');
+  const v20=MA(T.map(x=>x[5]),20,n-1);
   const up=seg.at(-1)[4]>=seg[0][4], col=up?'var(--up)':'var(--down)';
   const pts=seg.map((x,i)=>`${X(i).toFixed(1)},${Y(x[4]).toFixed(1)}`).join(' ');
   let g=`<g class="grid">`; for(let i=0;i<=4;i++){ const v=bot+(top-bot)*i/4, y=Y(v); g+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}"/><text x="${L-6}" y="${y+4}" text-anchor="end">${Math.round(v).toLocaleString('en-US')}</text>`; } g+='</g>';
@@ -589,7 +593,10 @@ function marketPanel(){
     ${maPts?`<polyline points="${maPts}" fill="none" stroke="var(--ma20)" stroke-width="1.4" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>`:''}
     <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/>
     <circle cx="${X(seg.length-1)}" cy="${Y(seg.at(-1)[4])}" r="3.5" fill="${col}"/>${tick}
-    <g id="mcross" style="display:none;pointer-events:none"><line id="mvline" y1="${TP}" y2="${TP+PH}" stroke="var(--muted)" stroke-dasharray="3 3"/><circle id="mdot" r="4" fill="var(--surface)" stroke="${col}" stroke-width="2"/></g></svg>
+    <g class="grid"><line x1="${L}" x2="${W-R}" y1="${VT+VH}" y2="${VT+VH}"/><text x="${L-6}" y="${VT+8}" text-anchor="end">${nf(vmax,0)}</text></g>
+    <text x="${L}" y="${VT-6}">成交值（億元）　紅：上漲日　綠：下跌日</text>${vol}
+    ${v20?`<line x1="${L}" x2="${W-R}" y1="${(VT+VH-v20/vmax*VH).toFixed(1)}" y2="${(VT+VH-v20/vmax*VH).toFixed(1)}" stroke="var(--ma20)" stroke-dasharray="4 3" stroke-width="1"/>`:''}
+    <g id="mcross" style="display:none;pointer-events:none"><line id="mvline" y1="${TP}" y2="${VT+VH}" stroke="var(--muted)" stroke-dasharray="3 3"/><circle id="mdot" r="4" fill="var(--surface)" stroke="${col}" stroke-width="2"/></g></svg>
     <div class="ctip" id="mtip" hidden></div></div>`;
   const tpe=tpeNow(), todayStr=tpe.toISOString().slice(0,10), intraday=t[0]!==todayStr&&tpe.getUTCDay()>=1&&tpe.getUTCDay()<=5&&tpe.getUTCHours()<16;
   return `<section class="mkt" aria-label="大盤走勢"><div>
@@ -605,7 +612,7 @@ function marketPanel(){
         <div><small>成交值</small><b>${nf(t[5],0)} 億</b></div></div>
       <div class="mkt-foot">昨收 ${nf(p[4],2)}｜20 日均量 ${nf(v20,0)} 億${intraday?'｜目前為盤中，今日收盤約 16:00 後更新':''}</div></div>
     <div class="mkt-chart"><div class="chips">${[[20,'1 個月'],[60,'3 個月'],[120,'6 個月']].map(([d,l])=>`<button class="chip" aria-pressed="${days===d}" data-act="mktDays" data-v="${d}">${l}</button>`).join('')}</div>
-      ${svg}<div class="mkt-foot">實線：收盤走勢　虛線：20 日均線　資料：FinMind（證交所盤後）</div></div></section>`;
+      ${svg}<div class="mkt-foot">實線：收盤走勢　虛線：20 日均線／20 日均量　資料：FinMind（證交所盤後）</div></div></section>`;
 }
 function mHover(e){
   const svg=$('#mchart'); if(!svg||!MKT) return; const C=MKT, r=svg.getBoundingClientRect();
