@@ -577,7 +577,7 @@ function marketPanel(){
   const seg=T.slice(-days), cl=T.map(x=>x[4]), start=n-seg.length, ma20=seg.map((_,i)=>MA(cl,20,start+i));
   const gap=t[1]-p[4];
   const narrow=(window.innerWidth||1200)<600, IM=new Map((S.instMkt?.rows||[]).map(r=>[r[0],r])), hasI=seg.some(x=>IM.has(x[0])), IH=hasI?(narrow?64:60):0;
-  const W=narrow?400:760,H=(narrow?330:300)+(hasI?IH+22:0),L=narrow?46:52,R=10,TP=10,VH=narrow?60:56,PH=(narrow?330:300)-TP-24-VH-22,VT=TP+PH+22,IT=VT+VH+22;
+  const cw=$('#main')?.clientWidth||1000, W=narrow?400:Math.round(Math.max(620,Math.min(1500,cw-380))),H=(narrow?330:300)+(hasI?IH+22:0),L=narrow?46:52,R=10,TP=10,VH=narrow?60:56,PH=(narrow?330:300)-TP-24-VH-22,VT=TP+PH+22,IT=VT+VH+22;
   const vals=[...seg.map(x=>x[2]),...seg.map(x=>x[3]),...ma20.filter(Boolean)], hi=Math.max(...vals), lo=Math.min(...vals), pad=(hi-lo)*.06||1;
   const top=hi+pad, bot=lo-pad, Y=v=>TP+(top-v)/(top-bot)*PH, X=i=>L+(seg.length<2?0:i/(seg.length-1)*(W-L-R));
   MKT={seg,X,Y,W,H,L,R,TP,PH,IM,prev:start>0?T[start-1][4]:null};
@@ -587,7 +587,7 @@ function marketPanel(){
   const v20=MA(T.map(x=>x[5]),20,n-1);
   const isum=r=>r?r[1]+r[2]+r[3]+r[4]+r[5]:null;
   function instCells(){
-    const R=S.instMkt?.rows||[]; if(!R.length) return `<div class="mkt-foot">三大法人：尚無資料，下次自動更新時會下載。</div>`;
+    const R=(S.instMkt?.rows||[]).filter(x=>x&&x[0]); if(!R.length) return `<div class="mkt-foot">三大法人：尚無資料，下次自動更新時會下載。</div>`;
     const r=IM.get(t[0])||R.at(-1), k=R.findIndex(x=>x[0]===r[0]), last5=R.slice(Math.max(0,k-4),k+1);
     const f=v=>`<b class="${cls(v)}">${v>=0?'+':''}${nf(v,1)}</b>`, s5=j=>last5.reduce((a,x)=>a+(j==='d'?x[3]+x[4]+x[5]:j==='t'?isum(x):x[j]),0);
     const cell=(name,v,v5)=>`<div><small>${name}</small>${f(v)}<small>近 5 日 ${v5>=0?'+':''}${nf(v5,1)}</small></div>`;
@@ -646,6 +646,7 @@ function mHover(e){
   tip.hidden=false; const wrap=svg.parentElement.getBoundingClientRect(), px=(x/C.W)*r.width, tw=tip.offsetWidth;
   tip.style.left=(px+14+tw>wrap.width?px-14-tw:px+14)+'px'; tip.style.top='8px';
 }
+let mktRT; window.addEventListener('resize',()=>{ clearTimeout(mktRT); mktRT=setTimeout(()=>{ if(S.view==='health'&&$('#mchart')) render(); },250); });
 document.addEventListener('pointermove',e=>{ if(e.target.closest?.('#mchart')) mHover(e); else if($('#mtip')&&!$('#mtip').hidden){ $('#mtip').hidden=true; const g=$('#mcross'); if(g) g.style.display='none'; } });
 function viewHealth(){
   const ids=scopeIds(); if(ids.length && !ids.includes(S.sel)) S.sel=ids[0];
@@ -892,9 +893,12 @@ let pxRunning=false;
 async function autoPrices(){
   if(!AUTO||pxRunning||S.busy) return;
   const t=tpeNow(), today=t.toISOString().slice(0,10), slot=today+(t.getUTCHours()>=16?'-pm':'-am');
-  let last=''; try{ last=LS.getItem('compass-pxslot')||''; }catch(e){}
-  if(last===slot||(last===today+'-pm'&&slot.endsWith('-am'))) return;
-  const ids=S.me.watch.filter(id=>S.me.companies.includes(id)&&co(id));
+  let last=''; try{ last=LS.getItem('compass-pxslot2')||''; }catch(e){}
+  const tx=taiex(), instLast=S.instMkt?.rows?.at(-1)?.[0]||'', stale=!autoPrices.tried&&(instLast<(tx.at(-1)?.[0]||'')||(S.instMkt?.rows?.length||0)<100);
+  const done=last===slot||(last===today+'-pm'&&slot.endsWith('-am'));
+  if(!stale&&done) return;
+  autoPrices.tried=true;
+  const ids=done?[]:S.me.watch.filter(id=>S.me.companies.includes(id)&&co(id));   // 本時段已更新過時，只補大盤與法人
   pxRunning=true; let n=0, fail=null, mk=false;
   const start=dstr(new Date(Date.now()-14*864e5));
   try{ // 大盤（加權指數）1 次查詢
@@ -920,7 +924,7 @@ async function autoPrices(){
     }catch(e){ fail=e; break; }
   }
   pxRunning=false; memo.clear();
-  if(!fail){ try{ LS.setItem('compass-pxslot',slot); }catch(e){} }
+  if(!fail){ try{ LS.setItem('compass-pxslot2',slot); }catch(e){} }
   if(n||mk){ render(); toast((mk?'已更新大盤與法人':'')+(n?(mk?'與 ':'已更新 ')+`${n} 檔追蹤個股的最新股價`:'走勢')+(fail?'（部分未完成）':'')); }
   else if(fail) toast('最新股價：'+hostError(fail),6000);
 }
@@ -1498,7 +1502,7 @@ function instSplit(rows){
 }
 // FinMind 大盤三大法人 → [日期, 外資, 投信, 自營自行, 自營避險, 自營未拆分]（億元）
 function instMktSplit(rows){
-  const m={}; for(const x of rows||[]){ const k=x.name||''; if(/total/i.test(k)) continue; const r=(m[x.date]=m[x.date]||[x.date,0,0,0,0,0]); const n=(x.buy-x.sell)/1e8;
+  const m={}; for(const x of rows||[]){ const k=x.name||''; if(!x.date||/total/i.test(k)) continue; const r=(m[x.date]=m[x.date]||[x.date,0,0,0,0,0]); const n=(x.buy-x.sell)/1e8;
     if(/^Foreign/.test(k)) r[1]+=n; else if(k==='Investment_Trust') r[2]+=n; else if(/Hedging/i.test(k)) r[4]+=n; else if(/^Dealer_?self/i.test(k)) r[3]+=n; else if(/^Dealer/.test(k)) r[5]+=n; }
   return Object.values(m).sort((a,b)=>a[0]<b[0]?-1:1).map(r=>[r[0],...r.slice(1).map(v=>Math.round(v*100)/100)]);
 }
