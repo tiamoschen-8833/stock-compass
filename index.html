@@ -362,13 +362,14 @@ function analyze(id){
   const yk=yr=>Array.from({length:nq},(_,i)=>`${yr}-${String((i+1)*3).padStart(2,'0')}`);
   const cur=yk(y), prv=yk(y-1);
   const sum=(ks,f)=>ks.every(k=>q[k]&&q[k][f]!=null)?ks.reduce((a,k)=>a+q[k][f],0):null;
-  const g=(a,b)=>a!=null&&b?a/Math.abs(b)-1:null;
+  const g=(a,b)=>a!=null&&b?(a-b)/Math.abs(b):null;   // (本期−前期)÷|前期|，前期為負值時方向仍正確
   const rev=sum(cur,'Revenue'), revP=sum(prv,'Revenue'), gp=sum(cur,'GrossProfit'), oi=sum(cur,'OperatingIncome');
   const pti=sum(cur,'PreTaxIncome'), ni=sum(cur,'IncomeAfterTaxes'), nip=sum(cur,'EquityAttributableToOwnersOfParent');
   const eps=sum(cur,'EPS'), epsP=sum(prv,'EPS');
   const lastPx=c.px.at(-1), prevPx=c.px.at(-2);
   const ttm=keys.slice(-4).every(k=>q[k].EPS!=null)?keys.slice(-4).reduce((a,k)=>a+q[k].EPS,0):null;
-  const pe = c.per?.[0] ?? (ttm>0 ? lastPx[4]/ttm : null);
+  const per0=c.per?.[0], pe = per0>0 ? per0 : (ttm>0 ? lastPx[4]/ttm : null);
+  const peLoss = pe==null && ((ttm!=null&&ttm<=0) || (per0===0 && (sum(cur,'EPS')??0)<0));   // 虧損時 FinMind 回傳 0，改標示為不適用
   const bs=c.bs[L]||{}, bsP=c.bs[`${y-1}-${String(mo).padStart(2,'0')}`]||{};
   const cf=c.cf[L]||{};
   const prevK=keys.at(-2), sq=q[L], pq=q[prevK]||{};
@@ -376,7 +377,7 @@ function analyze(id){
   const M = {
     period:`${y} Q${nq} 累計 vs ${y-1} Q${nq} 累計`, L, prevK, nq, fixed,
     rev, revP, revYoY:g(rev,revP), gm:gp!=null&&rev?gp/rev:null, om:oi!=null&&rev?oi/rev:null, oi, pti, ni, nip,
-    eps, epsP, epsYoY:g(eps,epsP), pe, pbr:c.per?.[1], dy:c.per?.[2], perDate:c.per?.[3],
+    eps, epsP, epsYoY:g(eps,epsP), pe, peLoss, pbr:c.per?.[1], dy:c.per?.[2], perDate:c.per?.[3],
     price:lastPx?.[4], chg:lastPx&&prevPx?lastPx[4]/prevPx[4]-1:null, pxDate:lastPx?.[0],
     debt:bs.Liabilities&&bs.TotalAssets?bs.Liabilities/bs.TotalAssets:null, liab:bs.Liabilities, ta:bs.TotalAssets,
     roe:nip!=null&&bs.EquityAttributableToOwnersOfParent?nip*(4/nq)/bs.EquityAttributableToOwnersOfParent:null,
@@ -389,7 +390,7 @@ function analyze(id){
   M.invGap = M.invG!=null&&M.revYoY!=null ? M.invG-M.revYoY : null;
   M.s = {
     revYoY:RULE(M.revYoY,.1,0), gm:RULE(M.gm,.3,.15), om:RULE(M.om,.15,.05), pti:RULE(M.pti,1e-9,-Infinity)==='good'?'good':(M.pti==null?'na':'bad'),
-    eps:M.eps==null?'na':M.eps>0?'good':'bad', pe:M.pe==null?'na':M.pe<=0?'bad':RULE(M.pe,20,35,-1), debt:RULE(M.debt,.5,.7,-1),
+    eps:M.eps==null?'na':M.eps>0?'good':'bad', pe:M.peLoss?'bad':M.pe==null?'na':M.pe<=0?'bad':RULE(M.pe,20,35,-1), debt:RULE(M.debt,.5,.7,-1),
     epsYoY:RULE(M.epsYoY,0,-.2), cashRatio:RULE(M.cashRatio,.8,.3), fcf:M.fcf==null?'na':M.fcf>0?'good':'warn',
     arGap:RULE(M.arGap,.1,.3,-1), invGap:RULE(M.invGap,.1,.3,-1)
   };
@@ -398,6 +399,15 @@ function analyze(id){
   M.score=Math.max(0,Math.round(score));
   memo.set(key,M); return M;
 }
+function chgOf(a,b){   // 回傳 [顯示文字, 顏色 class]；台股慣例紅＝改善、綠＝惡化
+  if(a==null||b==null||!b) return ['—','flat'];
+  const d=(a-b)/Math.abs(b), c=cls(a-b);
+  if(b>0&&a<0) return ['轉虧','down'];
+  if(b<0&&a>0) return ['轉盈','up'];
+  if(b<0&&a<0) return [(a>b?'虧損縮小 ':'虧損擴大 ')+pct(Math.abs(d),false),c];
+  return [pct(d),c];
+}
+const chgHtml=(a,b,k='')=>{ const [t,c]=chgOf(a,b); return `<span class="${k} ${c}">${t}</span>`; };
 function annual(c){
   const y={}; for(const [ym,v] of c.mr){const yr=Math.floor(ym/100); (y[yr]=y[yr]||{n:0,v:0}); y[yr].n++; y[yr].v+=v;}
   return Object.entries(y).map(([yr,o])=>({yr:+yr,v:o.v,full:o.n===12,n:o.n})).sort((a,b)=>a.yr-b.yr).slice(-6);
@@ -409,6 +419,7 @@ function readings(M){
     : ['bad','本業幾乎不賺錢',`營業利益率僅 ${(M.om*100).toFixed(1)}%，獲利可能主要依賴業外，應查明來源。`]);
   if(M.oi!=null&&M.pti!=null){ const nop=(M.pti-M.oi)/Math.abs(M.pti||1);
     r.push(Math.abs(nop)<=.2?['good','EPS 與本業方向大致一致','稅前淨利主要來自本業；若淨利大增但營業利益沒有同步，應查處分、匯兌或投資收益。']
+      : M.pti<=0 ? ['warn','業外損益影響明顯',`業外損益 ${(M.pti-M.oi>0?'+':'')+yi(M.pti-M.oi)}，使稅前${M.pti-M.oi>0?'虧損較本業縮小':'虧損較本業擴大'}，請查閱財報附註中的處分、匯兌或投資收益。`]
       :['warn','業外損益比重偏高',`業外約占稅前淨利 ${(nop*100).toFixed(0)}%，請查閱財報附註中的處分、匯兌或投資收益。`]); }
   if(M.cashRatio!=null) r.push(M.cashRatio>=.8?['good','獲利有現金支撐',`營業現金流約為淨利的 ${M.cashRatio.toFixed(2)} 倍。`]
     :['warn','帳上獲利尚未轉成現金',`現金獲利比 ${M.cashRatio.toFixed(2)} 倍，請比對應收帳款與存貨是否同步膨脹。`]);
@@ -676,15 +687,15 @@ function viewHealth(){
     ${metric('營收年增率',`<span class="${cls(M.revYoY)}">${pct(M.revYoY)}</span>`,s.revYoY,'銷售規模變化',`今年 ${yi(M.rev)}｜去年 ${yi(M.revP)}`)}
     ${metric('毛利率',pct(M.gm,false),s.gm,'產品競爭力','需與同業及自身歷史比較')}
     ${metric('營業利益率',pct(M.om,false),s.om,'本業賺錢效率',`營業利益 ${yi(M.oi)}`)}
-    ${metric('稅前淨利（淨損）',yi(M.pti),s.pti,'含業外損益、尚未扣除所得稅',`業外占比 ${M.pti&&M.oi!=null?pct((M.pti-M.oi)/M.pti,false,0):'—'}`)}
-    ${metric('每股盈餘（EPS）',nf(M.eps,2)+' 元',s.eps,`較去年同期：<span class="${cls(M.epsYoY)}">${pct(M.epsYoY)}</span>`,'累計 EPS（各季相加）')}
-    ${metric('本益比（P/E）',nf(M.pe,2)+'×',s.pe,'股價相對獲利的估值',`股價淨值比 ${nf(M.pbr,2)}｜殖利率 ${nf(M.dy,2)}%｜${M.perDate||''}`)}
+    ${metric('稅前淨利（淨損）',yi(M.pti),s.pti,'含業外損益、尚未扣除所得稅',`業外損益 ${M.pti!=null&&M.oi!=null?(M.pti-M.oi>0?'+':'')+yi(M.pti-M.oi)+(M.pti>0&&M.oi>0?'｜占稅前 '+pct((M.pti-M.oi)/M.pti,false,0):''):'—'}`)}
+    ${metric('每股盈餘（EPS）',nf(M.eps,2)+' 元',s.eps,`較去年同期：${chgHtml(M.eps,M.epsP)}`,'累計 EPS（各季相加）')}
+    ${metric('本益比（P/E）',M.peLoss?'不適用':nf(M.pe,2)+'×',s.pe,M.peLoss?'近四季虧損，無法計算本益比':'股價相對獲利的估值',`股價淨值比 ${nf(M.pbr,2)}｜殖利率 ${nf(M.dy,2)}%｜${M.perDate||''}`)}
     ${metric('負債比率',pct(M.debt,false),s.debt,'總負債 ÷ 總資產',`總負債 ${yi(M.liab)}｜總資產 ${yi(M.ta)}`)}
-    ${metric('EPS 變化',`<span class="${cls(M.epsYoY)}">${pct(M.epsYoY)}</span>`,s.epsYoY,'與去年同期比較','確認成長是否來自本業')}
+    ${metric('EPS 變化',chgHtml(M.eps,M.epsP),s.epsYoY,'與去年同期比較','確認成長是否來自本業')}
   </div>
   <div class="two"><div class="panel"><h4>單季比較</h4><p class="cap">${qLabel(M.L)} 單季｜對比 ${M.prevK?qLabel(M.prevK):'—'} 單季</p>
-    ${[['營收季增率','rev'],['營業利益季變化','oi'],['稅前淨利季變化','pti'],['稅後淨利季變化','ni'],['單季 EPS 變化','eps']].map(([t,k])=>{const [a,b]=M.qoq[k]; const d=a!=null&&b?a/Math.abs(b)-1:null;
-      return `<div class="qrow"><span class="k">${t}</span><span class="v ${cls(d)}">${pct(d)}</span><span class="d">${k==='eps'?nf(a)+' 元｜前季 '+nf(b)+' 元':yi(a)+'｜前季 '+yi(b)}</span></div>`}).join('')}
+    ${[['營收季增率','rev'],['營業利益季變化','oi'],['稅前淨利季變化','pti'],['稅後淨利季變化','ni'],['單季 EPS 變化','eps']].map(([t,k])=>{const [a,b]=M.qoq[k];
+      return `<div class="qrow"><span class="k">${t}</span>${chgHtml(a,b,'v')}<span class="d">${k==='eps'?nf(a)+' 元｜前季 '+nf(b)+' 元':yi(a)+'｜前季 '+yi(b)}</span></div>`}).join('')}
   </div><div class="panel"><h4>五年營收趨勢</h4><p class="cap">觀察成長是否具延續性（月營收加總，單位：億元）</p>${yearBars(M.years)}</div></div>
   <div class="panel" style="margin-top:14px"><h4>本業判讀</h4><p class="cap">系統把數字翻成商業語言</p>
     ${readings(M).map(([t,b,p])=>`<div class="read"><span class="i ${t}">${t==='good'?'✓':'!'}</span><div><b>${b}</b><p>${p}</p></div></div>`).join('')}</div></section>`;
@@ -1046,7 +1057,7 @@ function viewWatch(){
     <div class="row"><div><b style="font-size:17px">${esc(nameOf(id))}</b> <span class="num" style="color:var(--muted)">${id}</span></div>${ringMini(M.score)}</div>
     <div class="row"><span class="num" style="font-size:22px;font-weight:600">${nf(M.price,2)}</span><span class="num ${cls(M.chg)}">${pct(M.chg,true,2)}</span></div>
     <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap">${E?sgBadge(E.status):''}${E?[1,2,3,4].map(g=>`<span class="tg" style="${E.gates[g]?.pass?'border-color:var(--good);color:var(--good)':''}">閘門${g} ${E.gates[g]?.pass?'✓':Object.values(E.gates[g]?.items||{}).filter(x=>x.s==='ok').length+'/'+Object.keys(E.gates[g]?.items||{}).length}</span>`).join(''):''}</div>
-    <div class="mini"><div>營收年增<b class="${cls(M.revYoY)}">${pct(M.revYoY)}</b></div><div>本益比<b>${nf(M.pe,1)}×</b></div><div>報酬風險比<b>${E?.rr!=null?E.rr.toFixed(2)+' : 1':'—'}</b></div></div>
+    <div class="mini"><div>營收年增<b class="${cls(M.revYoY)}">${pct(M.revYoY)}</b></div><div>本益比<b>${M.peLoss?'虧損':nf(M.pe,1)+'×'}</b></div><div>報酬風險比<b>${E?.rr!=null?E.rr.toFixed(2)+' : 1':'—'}</b></div></div>
     <div class="row"><span style="font-size:13px;color:var(--accent);font-weight:500">查看訊號分析 →</span><span style="display:flex;gap:6px"><button class="btn sm" data-act="open" data-id="${id}">財報</button><button class="btn sm" data-act="goTech" data-id="${id}">走勢</button><button class="btn sm ghost" data-act="watch" data-id="${id}">取消追蹤</button></span></div></div>`}).join('')}</div>`;
   return h;
 }
@@ -1060,7 +1071,7 @@ function viewPeer(){
   let h=topbar('Cross-sectional view','同業比較',`<button class="btn gold" data-act="addCo">＋ 自動加入公司</button>`);
   h+=`<div class="banner">系統依「財報健檢」目前的公司自動帶入所屬群組；比較欄只列同群組公司，避免跨產業數字失真。目前群組：<b>${esc(g||'未分組')}</b>，共 ${pool.length} 家可比較。</div>`;
   const slots=[0,1,2,3].map(i=>{ const id=S.peer[i]; return id&&co(id)?{id,M:analyze(id)}:null; });
-  const rows=[['營收年增率','revYoY',pct,1],['毛利率','gm',v=>pct(v,false),1],['營業利益率','om',v=>pct(v,false),1],['稅前淨利（淨損）','pti',yi,0],['每股盈餘（EPS）','eps',v=>nf(v)+' 元',0],['本益比（P/E）','pe',v=>nf(v)+'×',-1],['負債比率','debt',v=>pct(v,false),-1],['ROE（年化）','roe',v=>pct(v,false),1],['現金獲利比','cashRatio',v=>nf(v)+'×',1],['應收帳款增幅','arG',pct,0],['財報健康分','score',v=>v+' 分',1]];
+  const rows=[['營收年增率','revYoY',pct,1],['毛利率','gm',v=>pct(v,false),1],['營業利益率','om',v=>pct(v,false),1],['稅前淨利（淨損）','pti',yi,0],['每股盈餘（EPS）','eps',v=>nf(v)+' 元',0],['本益比（P/E）','pe',v=>v==null?'—':nf(v)+'×',-1],['負債比率','debt',v=>pct(v,false),-1],['ROE（年化）','roe',v=>pct(v,false),1],['現金獲利比','cashRatio',v=>nf(v)+'×',1],['應收帳款增幅','arG',pct,0],['財報健康分','score',v=>v+' 分',1]];
   const sel=i=>`<label for="peer${i}" class="peer-l">比較公司 ${i+1}</label><select id="peer${i}" class="peer-s" data-chg="peer" data-i="${i}">${i===0?companyOptions(allIds,S.peer[0]):`<option value="">— 不比較 —</option>`+companyOptions(pool.filter(x=>x!==S.peer[0]),S.peer[i])}</select>`;
   h+=`<div class="tbl-wrap"><table class="peer-t"><colgroup><col class="c0">${'<col class="cx">'.repeat(4)}</colgroup>
     <thead><tr><th class="peer-h0">分析指標</th>${slots.map((c,i)=>`<th class="peer-h">${sel(i)}</th>`).join('')}</tr></thead><tbody>
@@ -1229,9 +1240,9 @@ function viewBrief(){
   const top=uni.map(u=>{const k=u.px.findIndex(x=>x[0]===S.brief.date); if(k<1) return null; return {id:u.id,v:u.val(u.px[k]),c:u.px[k][4],d:u.px[k][4]-u.px[k-1][4]};}).filter(Boolean).sort((a,b)=>b.v-a.v).slice(0,5);
   h+=`<section class="sec"><div class="sec-h"><span class="n">01</span><h3>成交值前五名</h3><p>系統收錄的公司與 ETF 中，依當日成交值排序</p></div><div class="tbl-wrap"><table><thead><tr><th>標的</th><th>收盤</th><th>漲跌</th><th>成交值（億）</th></tr></thead><tbody>${top.map((r,k)=>`<tr><td><span class="num" style="color:var(--accent)">${String(k+1).padStart(2,'0')}</span>　<span class="num">${r.id}</span> ${esc(nameOf(r.id))}</td><td class="num">${nf(r.c)}</td><td class="num ${cls(r.d)}">${r.d>0?'+':''}${nf(r.d)}</td><td class="num">${nf(r.v,1)}</td></tr>`).join('')}</tbody></table></div></section>`;
   const snap=S.briefs[S.brief.date];
-  const rows = snap ? snap.rows : S.me.watch.map(id=>{const M=analyze(id); const c=co(id); const k=c?.px.findIndex(x=>x[0]===S.brief.date); if(!M||k<1) return null; return {id, close:c.px[k][4], chg:c.px[k][4]/c.px[k-1][4]-1, pe:M.pe, score:M.score, bottom:bottomEval(c.px,k).status};}).filter(Boolean);
+  const rows = snap ? snap.rows : S.me.watch.map(id=>{const M=analyze(id); const c=co(id); const k=c?.px.findIndex(x=>x[0]===S.brief.date); if(!M||k<1) return null; return {id, close:c.px[k][4], chg:c.px[k][4]/c.px[k-1][4]-1, pe:M.peLoss?0:M.pe, score:M.score, bottom:bottomEval(c.px,k).status};}).filter(Boolean);
   h+=`<section class="sec"><div class="sec-h"><span class="n">02</span><h3>我的追蹤清單與估值觀察</h3><p>${snap?'此日已保存快照，顯示當時的資料與判斷':'依目前追蹤清單即時計算'}</p></div>
-   ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>公司</th><th>收盤</th><th>漲跌幅</th><th>本益比</th><th>健康分</th><th>打底狀態</th><th>估值觀察</th></tr></thead><tbody>${rows.map(r=>`<tr><td><span class="num">${r.id}</span> ${esc(nameOf(r.id))}</td><td class="num">${nf(r.close)}</td><td class="num ${cls(r.chg)}">${pct(r.chg,true,2)}</td><td class="num">${nf(r.pe,1)}×</td><td class="num">${r.score}</td><td style="text-align:left">${r.bottom?btBadge(r.bottom):'—'}</td><td style="text-align:left">${r.pe==null?'—':r.pe<=0?'虧損，本益比不適用':r.pe<15?'本益比偏低，需確認成長是否放緩':r.pe<=25?'位於一般合理區間':'本益比偏高，需高成長支撐'}</td></tr>`).join('')}</tbody></table></div>`
+   ${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>公司</th><th>收盤</th><th>漲跌幅</th><th>本益比</th><th>健康分</th><th>打底狀態</th><th>估值觀察</th></tr></thead><tbody>${rows.map(r=>`<tr><td><span class="num">${r.id}</span> ${esc(nameOf(r.id))}</td><td class="num">${nf(r.close)}</td><td class="num ${cls(r.chg)}">${pct(r.chg,true,2)}</td><td class="num">${r.pe!=null&&r.pe<=0?'虧損':nf(r.pe,1)+'×'}</td><td class="num">${r.score}</td><td style="text-align:left">${r.bottom?btBadge(r.bottom):'—'}</td><td style="text-align:left">${r.pe==null?'—':r.pe<=0?'虧損，本益比不適用':r.pe<15?'本益比偏低，需確認成長是否放緩':r.pe<=25?'位於一般合理區間':'本益比偏高，需高成長支撐'}</td></tr>`).join('')}</tbody></table></div>`
    :`<div class="empty"><b>尚無追蹤個股</b>在「財報健檢」按「加入追蹤」後，早報會自動列出估值觀察。</div>`}</section>`;
   h+=bottomSection(S.brief.date);
   h+=`<div class="foot-notes"><div class="panel"><p><b>資料說明</b>　加權指數與成交值取自 FinMind 整理之證交所盤後資料（TAIEX）。全市場漲跌家數需付費資料，本頁未提供。</p></div><div class="panel"><p><b>使用提醒</b>　這是資訊整理與學習工具，不構成買賣建議。投資判讀仍應搭配公司財報、產業循環、估值及風險承受度。</p></div></div>`;
@@ -1862,7 +1873,7 @@ const A={
   etfDetail:d=>{S.etf.detail=d.id||null; render(); if(d.id) document.querySelector('.detail')?.scrollIntoView({block:'nearest'});}, cmpClear:()=>{S.etf.cmp=[]; render();},
   newGroup:()=>{ const v=$('#ng').value.trim(); if(!v) return; if(!S.me.groups[v]) S.me.groups[v]=[]; persist(); groupsModal(); },
   delGroup:d=>{ delete S.me.groups[d.v]; if(S.scope===d.v) S.scope='all'; persist(); groupsModal(); render(); },
-  saveBrief:async()=>{ const date=S.brief.date; const rows=S.me.watch.map(id=>{const M=analyze(id),c=co(id),k=c?.px.findIndex(x=>x[0]===date); if(!M||k<1) return null; return {id,close:c.px[k][4],chg:c.px[k][4]/c.px[k-1][4]-1,pe:M.pe,score:M.score,bottom:bottomEval(c.px,k).status};}).filter(Boolean);
+  saveBrief:async()=>{ const date=S.brief.date; const rows=S.me.watch.map(id=>{const M=analyze(id),c=co(id),k=c?.px.findIndex(x=>x[0]===date); if(!M||k<1) return null; return {id,close:c.px[k][4],chg:c.px[k][4]/c.px[k-1][4]-1,pe:M.peLoss?0:M.pe,score:M.score,bottom:bottomEval(c.px,k).status};}).filter(Boolean);
     S.briefs[date]={rows,savedAt:Date.now()};
     if(S.mode==='db'&&canWrite()){ try{ await S.db.doc(`members/${S.uid}/briefs/${date}`).set(S.briefs[date]); toast('已保存 '+date+' 快照'); }catch(e){ toast('快照保存失敗：'+(e.code||'')); } }
     else { try{LS.setItem('compass-briefs',JSON.stringify(S.briefs))}catch(e){} toast('已保存在此瀏覽器'); } render(); },
