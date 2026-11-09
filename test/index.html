@@ -768,7 +768,7 @@ function lineSpark(arr,k,W=520,H=90,col='var(--ink)'){
 function chipSection(id){
   let h=`<section class="sec"><div class="sec-h"><span class="n">03</span><h3>籌碼面</h3><p>法人、外資與散戶槓桿的動向（不列入財報健康分）</p></div>`;
   const E=chipEval(id);
-  if(!E||!E.inst.length) return h+`<div class="empty"><b>尚無籌碼資料</b>按上方「↻ 更新此公司」即可取得三大法人、外資持股與融資融券資料。</div></section>`;
+  if(!E||!E.inst.length) return h+`<div class="empty"><b>尚無籌碼資料</b>按上方「↻ 更新此公司」即可取得三大法人、外資持股與融資融券資料。</div>${fx5Panel()}</section>`;
   const names=['外資','投信','自營商'];
   h+=`<div class="grid g3">
   <div class="panel"><div class="h-row"><h4>三大法人買賣超</h4>${toneTag(E.instTone)}</div><p class="cap">單位：張｜資料日 ${E.instDate}</p>
@@ -786,9 +786,66 @@ function chipSection(id){
       <div>融資使用率<b>${pct(E.usage,false,2)}</b></div><div>股價 20 日<b class="${cls(E.p20)}">${pct(E.p20)}</b></div>
       <div>融券餘額<b>${nf(E.sBal,0)}</b></div><div>券資比<b>${pct(E.ssr,false,2)}</b></div></div>
     ${lineSpark(E.mg.slice(-60),1,520,90,'var(--ma20)')}<p class="cap" style="margin:0">近 60 個交易日融資餘額走勢</p></div></div>
+  ${fx5Panel()}
   <div class="panel" style="margin-top:14px"><h4>籌碼判讀</h4><p class="cap">依最新資料自動整理，描述現況，不代表後續漲跌</p>
     ${E.read.map(([t,b,p])=>`<div class="read"><span class="i ${t==='bull'?'good':t==='bear'?'bad':'warn'}">${t==='bull'?'↑':t==='bear'?'↓':'–'}</span><div><b>${b}</b><p>${p}</p></div></div>`).join('')}</div></section>`;
   return h;
+}
+
+/* ---------- 外資近五日買超清單（羅盤全部公司） ---------- */
+const FX5_MIN=500;   // 門檻：外資近 5 日合計買超 > 500 張
+function fx5Store(){ try{ return JSON.parse(LS.getItem('compass-fx5')||'null')||{upd:null,rows:{}}; }catch(e){ return {upd:null,rows:{}}; } }
+function fx5Rows(id){   // 取較新的一份：專用快取 或 公司完整資料中的三大法人
+  const a=fx5Store().rows[id]||[], b=chipOf(id)?.inst||[];
+  return (a.at(-1)?.[0]||'')>=(b.at(-1)?.[0]||'')?a:b;
+}
+function fx5List(){
+  const out=[], none=[];
+  for(const id of S.me.companies){
+    const r=fx5Rows(id); if(r.length<5){ none.push(id); continue; }
+    const seg=r.slice(-5), f5=seg.reduce((a,x)=>a+x[1],0);
+    let st=0; for(let t=r.length-1;t>=0&&r[t][1]>0;t--) st++;
+    const px=co(id)?.px||[], v20=px.length?px.slice(-20).reduce((a,x)=>a+x[5],0)/Math.min(20,px.length):null;
+    out.push({id,f5,f1:r.at(-1)[1],st,days:seg.map(x=>x[1]),date:r.at(-1)[0],v20});
+  }
+  const latest=out.reduce((m,x)=>x.date>m?x.date:m,'');
+  return {hit:out.filter(x=>x.f5>FX5_MIN).sort((a,b)=>b.f5-a.f5), latest, stale:out.filter(x=>x.date<latest).map(x=>x.id), none, total:S.me.companies.length};
+}
+function fx5Panel(){
+  const L=fx5List(), st=fx5Store();
+  const upd=st.upd?new Date(st.upd).toLocaleString('zh-TW',{hour12:false,month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):null;
+  let h=`<div class="panel" style="margin-top:14px"><div class="h-row"><h4>外資近五日買超 &gt; ${FX5_MIN} 張</h4><span class="st bull">${L.hit.length} 檔</span></div>
+    <p class="cap">羅盤全部 ${L.total} 家公司｜單位：張｜最新資料日 ${L.latest||'—'}${upd?`｜清單更新 ${upd}`:''}</p>`;
+  if(!L.hit.length) h+=`<div class="empty" style="padding:18px"><b>目前沒有符合條件的個股</b>${L.latest?'近 5 個交易日外資合計買超都未超過 '+FX5_MIN+' 張。':'尚無三大法人資料，請按下方按鈕取得。'}</div>`;
+  else h+=`<div class="tbl-wrap" style="border:0;border-radius:0"><table class="mini-t"><thead><tr><th>公司</th><th>近 5 日合計</th><th>今日</th><th>近 5 日逐日</th><th>外資連買</th><th>占 20 日均量</th><th>資料日</th></tr></thead><tbody>
+    ${L.hit.map(x=>`<tr><td><a href="#" data-act="open" data-id="${x.id}" style="color:inherit"><b>${esc(nameOf(x.id))}</b> <span class="cap">${x.id}</span></a></td>
+      <td class="num up"><b>${zhang(x.f5)}</b></td><td class="num ${cls(x.f1)}">${zhang(x.f1)}</td>
+      <td class="num" style="white-space:nowrap">${x.days.map(v=>`<span class="${cls(v)}">${v>0?'▲':v<0?'▼':'–'}</span>`).join(' ')}</td>
+      <td class="num">${x.st?x.st+' 日':'—'}</td><td class="num">${x.v20?pct(x.f5/x.v20/5,false,1):'—'}</td>
+      <td class="num ${L.stale.includes(x.id)?'down':''}">${x.date.slice(5).replace('-','/')}${L.stale.includes(x.id)?' 舊':''}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  const warn=[]; if(L.stale.length) warn.push(`${L.stale.length} 家資料日早於 ${L.latest}（${L.stale.map(i=>esc(nameOf(i))).join('、')}）`); if(L.none.length) warn.push(`${L.none.length} 家尚無資料（${L.none.map(i=>esc(nameOf(i))).join('、')}）`);
+  h+=`<div class="h-row" style="margin-top:10px;flex-wrap:wrap"><p class="cap" style="margin:0">點公司名稱可切換到該公司｜▲買超 ▼賣超｜占均量＝5 日日均買超 ÷ 20 日均量${warn.length?'<br>⚠ '+warn.join('；'):''}</p>
+    <button class="btn sm" data-act="updFx5">↻ 更新外資資料（${L.total} 家）</button></div>
+    <p class="cap" style="margin:6px 0 0">只整理籌碼數據，不代表後續漲跌，不構成投資建議。</p></div>`;
+  return h;
+}
+async function updateFx5(){
+  if(S.busy) return;
+  const ids=[...S.me.companies]; S.busy={label:'更新外資近五日資料', done:0, total:ids.length, note:''}; render();
+  const st=fx5Store(), since=dstr(new Date(Date.now()-40*864e5)); let ok=0;
+  try{
+    for(const id of ids){
+      S.busy.note=`${nameOf(id)}（${id}）`; paintBusy();
+      const ins=await bget(`dataset=TaiwanStockInstitutionalInvestorsBuySell&data_id=${id}&start_date=${since}`);
+      const im={}; for(const x of ins){ const r=(im[x.date]=im[x.date]||[x.date,0,0,0]); const n=(x.buy-x.sell)/1000; if(/^Foreign/.test(x.name)) r[1]+=n; else if(x.name==='Investment_Trust') r[2]+=n; else if(/^Dealer/.test(x.name)) r[3]+=n; }
+      st.rows[id]=Object.values(im).sort((a,b)=>a[0]<b[0]?-1:1).map(r=>[r[0],Math.round(r[1]),Math.round(r[2]),Math.round(r[3])]);
+      ok++; S.busy.done++;
+    }
+    toast(`已更新 ${ok} 家公司的外資資料`);
+  }catch(e){ toast((ok?`已更新 ${ok} 家，其餘未完成。`:'')+hostError(e), 7000); }
+  st.upd=Date.now(); try{ LS.setItem('compass-fx5',JSON.stringify(st)); }catch(e){}
+  S.busy=null; render();
 }
 
 /* ---------- 個人清單跨裝置同步（GitHub 專案中的清單檔；權杖只存在使用者自己的瀏覽器） ---------- */
@@ -1777,6 +1834,7 @@ const A={
   watch:d=>{ const w=S.me.watch, i=w.indexOf(d.id); i<0?w.push(d.id):w.splice(i,1); persist(); render(); toast(i<0?'已加入追蹤':'已取消追蹤'); },
   delCo:d=>modal(`<h3>刪除 ${esc(nameOf(d.id))}？</h3><p>會從你的公司清單、群組與追蹤中移除，共用的財報資料不受影響。</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-act="close">取消</button><button class="btn pri" data-act="delYes" data-id="${d.id}">刪除</button></div>`),
   delYes:d=>{ const id=d.id; S.me.companies=S.me.companies.filter(x=>x!==id); S.me.watch=S.me.watch.filter(x=>x!==id); for(const g in S.me.groups) S.me.groups[g]=S.me.groups[g].filter(x=>x!==id); persist(); closeModal(); S.sel=S.me.companies[0]; render(); toast('已刪除'); },
+  updFx5:()=>updateFx5(),
   updAll:()=>{ const all=scopeIds(), ids=all.filter(id=>!(S.cache[id]?.upd>Date.now()-6*3600e3)); if(!ids.length){ toast('全部公司 6 小時內都已更新過，不需重複下載'); return; } if(ids.length<all.length) toast(`略過 ${all.length-ids.length} 家 6 小時內已更新的公司`); runUpdate(ids,'更新全部公司'); }, updOne:()=>runUpdate([S.sel],'更新 '+nameOf(S.sel)), updMarket:()=>updateMarket(),
   open:d=>{S.sel=d.id; S.scope='all'; A.nav({v:'health'});}, goTech:d=>{S.tech.id=d.id; A.nav({v:'tech'});},
   days:d=>{S.tech.days=+d.v; render();},
