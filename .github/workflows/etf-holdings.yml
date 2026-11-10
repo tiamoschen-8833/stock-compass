@@ -1,0 +1,28 @@
+name: ETF 每日持股
+on:
+  schedule:
+    # 台北時間週一至週五 17:20、20:20（UTC+8）；元大通常於收盤後約 16:00 更新當日持股
+    - cron: '20 9 * * 1-5'
+    - cron: '20 12 * * 1-5'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: etf-holdings
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/etf-holdings.mjs
+      - name: 提交結果
+        run: |
+          if [ -z "$(git status --porcelain etf-holdings.json)" ]; then echo "沒有變更"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add etf-holdings.json
+          git commit -m "ETF 持股 $(TZ=Asia/Taipei date +%F)"
+          git pull --rebase origin main
+          git push

@@ -1005,6 +1005,8 @@ function syncPill(){
 }
 if(AUTO) document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ if(Date.now()-ghLastPull>20000) ghRun(false); else autoPrices(); } });
 let SIG_REMOTE=null;
+let ETF_HOLD=null;   // etf-holdings.json：0050／0056 每日成分股持股（GitHub Actions 每個交易日抓元大投信持股比重頁）
+async function loadEtfHold(){ try{ const r=await fetch((ENV==='test'?'../':'')+'etf-holdings.json?t='+Date.now(),{cache:'no-store'}); if(r.ok){ ETF_HOLD=await r.json(); if(['watch','etf'].includes(S.view)) render(); } }catch(e){} }
 async function loadRemoteSignals(){ if(!onPages) return; try{ const r=await fetch((ENV==='test'?'../':'')+'signals.json?t='+Date.now(),{cache:'no-store'}); if(r.ok){ SIG_REMOTE=await r.json(); if(S.view==='watch') render(); } }catch(e){} }
 function notifyPanel(){
   if(!onPages) return `<div class="panel" style="margin-bottom:14px;font-size:13.5px"><b>收盤後自動通知</b>　自動通知讀取的是 GitHub 網站版的追蹤清單，請在 tiamoschen-8833.github.io/stock-compass 管理追蹤個股。</div>`;
@@ -1193,8 +1195,21 @@ function viewEtf(){
       <label style="font-size:12.5px;margin:0 6px"><input type="checkbox" data-chg="cmp" data-id="${r.c}" ${S.etf.cmp.includes(r.c)?'checked':''} ${r.px.length?'':'disabled'}> 比較</label>
       <button class="btn sm" data-act="etfDetail" data-id="${r.c}" ${r.px.length?'':'disabled'}>詳情</button></td></tr>`).join('')}</tbody></table></div>
     ${rows.length>120?`<p style="font-size:13px;color:var(--muted)">只顯示前 120 檔，請用搜尋或篩選縮小範圍。</p>`:''}`;
+  h+=etfMarketSec();
   h+=`<div class="foot-notes"><div class="panel"><p><b>資料來源</b>　FinMind 整理之證交所／櫃買中心盤後日成交與證券基本資料。</p></div><div class="panel"><p><b>閱讀提醒</b>　類別由系統依代號與名稱整理；淨值、折溢價、費用率與配息請回到投信公告或公開說明書核對。</p></div><div class="panel"><p><b>風險提醒</b>　槓桿、反向與期貨 ETF 的每日報酬設計不同於長期累積報酬，不宜只用名稱或單日漲跌判斷。</p></div></div>`;
   return h;
+}
+function etfMarketSec(){
+  return `<section class="sec"><div class="sec-h"><span class="n">◎</span><h3>大盤 ETF 動態（參考）</h3><p>分開看「次級市場成交量」與「初級市場受益權單位淨增減」</p></div>
+    <div class="panel"><h4>次級市場成交量</h4><p class="cap">單位：張｜成交放量不代表基金獲得新資金</p>
+    <div class="tbl-wrap"><table class="mini-t"><thead><tr><th>ETF</th><th>當日量</th><th>近 5 日均量</th><th>5 日／20 日</th><th>資料日</th></tr></thead><tbody>${ETF_HOLD_LIST.map(etfVolRow).join('')}</tbody></table></div>
+    <h4 style="margin-top:14px">初級市場受益權單位</h4>
+    <div class="banner" style="margin:6px 0 0"><b>資料狀態：尚未串接</b>　目前資料源未提供受益權單位數與每日申贖，本區不以估算代替。請至發行商公告查詢：<a href="https://www.yuantaetfs.com/" target="_blank" rel="noopener">元大投信 ETF 專區</a>（0050、0056）、<a href="https://www.twse.com.tw/zh/ETFortune/" target="_blank" rel="noopener">證交所 ETF e添富</a>。個股的 ETF 持股增減已另外串接，請見「追蹤中個股 → 法人動態 → 本股 ETF 持股變化」。</div>
+    <ul style="font-size:12.5px;color:var(--muted);margin:10px 0 0;padding-left:18px;line-height:1.7">
+      <li>淨申購可透過實物申購、既有庫存或調整交易完成，不必然形成投信當日現貨買超。</li>
+      <li>台積電上漲會使其在市值加權組合中的權重自然提高，不代表 ETF 必須額外買入。</li>
+      <li>0056 與 0050 的追蹤指數、選股與權重規則不同，不可把 0056 淨申購推算成台積電買盤。</li>
+      <li>比對申購變化與法人買賣超時，請依 T−1、T、T+1、T+2 的時序觀察，並標註公告落後天數。</li></ul></div></section>`;
 }
 function spark(px,w=300,h=70){ const c=px.map(x=>x[4]); const mx=Math.max(...c), mn=Math.min(...c), r=mx-mn||1;
   const pts=c.map((v,i)=>`${(i/(c.length-1))*w},${h-6-(v-mn)/r*(h-12)}`).join(' '); const col=c.at(-1)>=c[0]?'var(--up)':'var(--down)';
@@ -1746,21 +1761,42 @@ function ifPrice(R,id){
     <p class="cap" style="margin:8px 0 0">整理區上緣優先採四道閘門的反彈高點 H；尚無 H 時改用低點後的最高價。四道閘門的判定不受本模組影響。</p></div>
     <div class="panel">${items.join('')}</div></div></section>`;
 }
+function etfVolRow(c){ const p=etfData()[c]?.px||[]; if(p.length<6) return `<tr><td>${c}</td><td colspan="4" style="color:var(--muted)">尚無成交資料</td></tr>`;
+  const k=p.length-1, v5=p.slice(-5).reduce((a,x)=>a+x[5],0)/5, n20=Math.min(20,p.length), v20=p.slice(-n20).reduce((a,x)=>a+x[5],0)/n20;
+  return `<tr><td><span class="num">${c}</span> ${esc(nameOf(c))}</td><td class="num">${nf(p[k][5],0)}</td><td class="num">${nf(v5,0)}</td><td class="num">${(v5/v20*100).toFixed(0)}%</td><td class="num">${p[k][0]}</td></tr>`; }
+const ETF_HOLD_LIST=['0050','0056'];
+// 本股在單一 ETF 的持股序列：相鄰資料日股數相減；單位換算為張（1 張＝1,000 股）
+function etfHoldOf(c,id){
+  const D=ETF_HOLD?.etfs?.[c]?.days||[]; if(!D.length) return null;
+  const ser=D.map(d=>({d:d.d,q:d.h[id]?d.h[id][0]:null,w:d.h[id]?d.h[id][1]:null}));
+  const last=ser.at(-1), chg=(n)=>{ const b=ser[ser.length-1-n]; if(!b) return null; return ((last.q||0)-(b.q||0))/1000; };
+  const daily=ser.map((x,i)=>i?{d:x.d,v:((x.q||0)-(ser[i-1].q||0))/1000,inn:x.q!=null,was:ser[i-1].q!=null}:null).filter(Boolean);
+  const lastIn=[...ser].reverse().find(x=>x.q!=null);
+  return {c,date:last.d,upd:D.at(-1).upd,inNow:last.q!=null,q:last.q,w:last.w,d1:chg(1),d5:chg(5),d20:chg(Math.min(20,ser.length-1)),
+    n:ser.length,daily:daily.slice(-10),everIn:!!lastIn,lastIn:lastIn?.d,first:ser[0].d,
+    newIn:last.q!=null&&ser.length>1&&ser.at(-2).q==null, out:last.q==null&&ser.length>1&&ser.at(-2).q!=null};
+}
+function etfAct(x){ if(x.newIn) return ['bull','新進成分股']; if(x.out) return ['bear','出清']; if(x.d1>0) return ['bull','加碼']; if(x.d1<0) return ['bear','減碼']; return ['flat','持平']; }
+const sgnN=v=>v==null?'—':(v>0?'+':'')+nf(v,0);
 function ifEtf(id){
-  let h=ifSec('05','ETF 關聯','分開看「次級市場成交量」與「初級市場受益權單位淨增減」');
-  const ed=etfData(); const row=c=>{ const p=ed[c]?.px||[]; if(p.length<6) return `<tr><td>${c}</td><td colspan="4" style="color:var(--muted)">尚無成交資料</td></tr>`;
-    const k=p.length-1, v5=p.slice(-5).reduce((a,x)=>a+x[5],0)/5, n20=Math.min(20,p.length), v20=p.slice(-n20).reduce((a,x)=>a+x[5],0)/n20;
-    return `<tr><td><span class="num">${c}</span> ${esc(nameOf(c))}</td><td class="num">${nf(p[k][5],0)}</td><td class="num">${nf(v5,0)}</td><td class="num">${(v5/v20*100).toFixed(0)}%</td><td class="num">${p[k][0]}</td></tr>`; };
-  return h+`<div class="panel"><h4>次級市場成交量</h4><p class="cap">單位：張｜成交放量不代表基金獲得新資金</p>
-    <div class="tbl-wrap"><table class="mini-t"><thead><tr><th>ETF</th><th>當日量</th><th>近 5 日均量</th><th>5 日／20 日</th><th>資料日</th></tr></thead><tbody>${row('0050')}${row('0056')}</tbody></table></div>
-    <h4 style="margin-top:14px">初級市場受益權單位</h4>
-    <div class="banner" style="margin:6px 0 0"><b>資料狀態：尚未串接</b>　目前資料源（FinMind 免費資料）未提供受益權單位數、每日申贖與成分股持股變化，本區不以估算代替。請至發行商公告查詢：<a href="https://www.yuantaetfs.com/" target="_blank" rel="noopener">元大投信 ETF 專區</a>（0050、0056）、<a href="https://www.twse.com.tw/zh/ETFortune/" target="_blank" rel="noopener">證交所 ETF e添富</a>。</div>
-    <p class="cap" style="margin:10px 0 0">本股是否為 0050／0056 成分股及其權重，請以發行商最新公告為準；系統未驗證前不推定。</p>
+  let h=ifSec('05','本股 ETF 持股變化',`0050、0056 對 ${esc(nameOf(id))}（${id}）的每日持有股數｜單位：張（1 張＝1,000 股）`);
+  if(!ETF_HOLD) return h+`<div class="panel"><div class="empty" style="margin:0"><b>ETF 持股資料載入中</b>${onPages?'若持續沒有顯示，請重新整理頁面。':'本機開啟時無法讀取 etf-holdings.json，請改用 GitHub Pages 網址。'}</div></div></section>`;
+  const X=ETF_HOLD_LIST.map(c=>etfHoldOf(c,id)).filter(Boolean);
+  const inn=X.filter(x=>x.inNow||x.out);
+  const rows=X.map(x=>{ if(!x.inNow&&!x.out) return `<tr><td><span class="num">${x.c}</span> ${esc(nameOf(x.c))}</td><td colspan="6" style="color:var(--muted)">非成分股${x.everIn?`（最後持有日 ${x.lastIn}）`:`（${x.first} 至 ${x.date} 期間皆未持有）`}</td><td class="num">${x.date}</td></tr>`;
+    const t=etfAct(x);
+    return `<tr><td><span class="num">${x.c}</span> ${esc(nameOf(x.c))}</td><td class="num">${x.inNow?nf(x.q/1000,0):'0'}</td><td class="num">${x.inNow?nf(x.w,2)+'%':'—'}</td><td class="num ${cls(x.d1)}">${sgnN(x.d1)}</td><td class="num ${cls(x.d5)}">${sgnN(x.d5)}</td><td class="num ${cls(x.d20)}">${sgnN(x.d20)}</td><td><span class="st ${t[0]}">${t[1]}</span></td><td class="num">${x.date}</td></tr>`; }).join('');
+  const days=inn.length?`<h4 style="margin-top:14px">近 10 個資料日每日增減（張）</h4><p class="cap">與上方法人買賣超對照時，請依 T−1、T、T+1 的順序比對；ETF 持股日為發行商公告日，可能晚於法人資料日。</p>
+    <div class="tbl-wrap"><table class="mini-t"><thead><tr><th>ETF</th>${inn[0].daily.map(d=>`<th>${d.d.slice(5)}</th>`).join('')}</tr></thead><tbody>${inn.map(x=>`<tr><td class="num">${x.c}</td>${x.daily.map(d=>`<td class="num ${cls(d.v)}">${!d.inn&&!d.was?'—':sgnN(d.v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'';
+  const lag=inn.length?inn[0].date:null;
+  return h+`<div class="panel"><div class="tbl-wrap"><table class="mini-t"><thead><tr><th>ETF</th><th>持有張數</th><th>權重</th><th>較前一資料日</th><th>近 5 日</th><th>近 20 日</th><th>動作</th><th>持股資料日</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${days}
+    <p class="cap" style="margin:10px 0 0">資料來源：${esc(ETF_HOLD.source||'元大投信 ETF 持股比重頁')}，GitHub Actions 每個交易日盤後抓取${lag?`；最新持股資料日 ${lag}`:''}。${ETF_HOLD.failed?.length?`<b style="color:var(--warn)">　最近一次抓取失敗：${esc(ETF_HOLD.failed.join('；'))}</b>`:''}</p>
     <ul style="font-size:12.5px;color:var(--muted);margin:10px 0 0;padding-left:18px;line-height:1.7">
-      <li>淨申購可透過實物申購、既有庫存或調整交易完成，不必然形成投信當日現貨買超。</li>
-      <li>台積電上漲會使其在市值加權組合中的權重自然提高，不代表 ETF 必須額外買入。</li>
-      <li>0056 與 0050 的追蹤指數、選股與權重規則不同，不可把 0056 淨申購推算成台積電買盤。</li>
-      <li>比對申購變化與法人買賣超時，請依 T−1、T、T+1、T+2 的時序觀察，並標註公告落後天數。</li></ul></div></section>`;
+      <li>持有股數增減主要來自投資人申購、買回的實物交割與指數調整，不等於 ETF 當天在集中市場買進或賣出，也不必然出現在投信買賣超。</li>
+      <li>權重會隨股價自然變動；判斷 ETF 是否加碼，請看「持有張數」的變化，不看權重。</li>
+      <li>0050 依市值加權、0056 依高股息選股，兩者的增減原因不同，不宜相加解讀。</li>
+      <li>其他 ETF（例如 00878、00919 等）目前尚未收錄；大盤 ETF 成交量請見「ETF 專區 → 大盤 ETF 動態（參考）」。</li></ul></div></section>`;
 }
 function ifSummary(R,id){
   const k=R.key, one={A:'外資賣、投信買，股價未再破低，屬「疑似」承接，尚未有價格確認。',B:'股價在區間內整理、法人方向不一，等待方向表態；盤整也可能向下突破。',C:'外資轉買並搭配價格突破，反轉訊號增強，但不等同未來必然上漲。',D:'法人動向與價格表現互相矛盾，反轉未確認，宜回查類股與個股細節。',N:'法人與價格尚未形成規則中的任何型態，維持觀察。',X:'資料不足，暫不判讀。'}[k];
@@ -1932,6 +1968,7 @@ if(!S.me.companies.includes(S.sel)) S.sel=S.me.companies[0];
 readHash();
 render();
 loadRemoteSignals();
+loadEtfHold();
 if(AUTO) ghRun(false);
 
 (async()=>{
