@@ -73,7 +73,7 @@ for (const e of ETFS) {
     console.log(e.code, '失敗', err.message);
   }
 }
-if (!changed && !failed.length) { console.log('沒有新資料'); process.exit(0); }
+if (!changed && JSON.stringify(failed) === JSON.stringify(db.failed || [])) { console.log('沒有新資料'); process.exit(0); }
 db.generatedAt = new Date().toISOString();
 db.source = '元大投信 ETF 持股比重頁（yuantaetfs.com）';
 db.failed = failed;
