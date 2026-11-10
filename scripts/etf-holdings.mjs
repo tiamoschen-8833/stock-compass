@@ -51,7 +51,13 @@ const failed = [];
 let changed = false;
 for (const e of ETFS) {
   try {
-    const x = extract(await getHtml(e.url));
+    // 元大頁面偶爾回傳未帶持股資料的版本，最多重試 3 次
+    let x, last;
+    for (let t = 1; t <= 3 && !x; t++) {
+      try { x = extract(await getHtml(e.url)); }
+      catch (err) { last = err; console.log(e.code, '第 ' + t + ' 次失敗：' + err.message); if (t < 3) await new Promise(r => setTimeout(r, 15000)); }
+    }
+    if (!x) throw last;
     const slot = db.etfs[e.code] ||= { name: x.name, url: e.url, days: [] };
     slot.name = x.name || slot.name; slot.url = e.url;
     const old = slot.days.find(d => d.d === x.date);
